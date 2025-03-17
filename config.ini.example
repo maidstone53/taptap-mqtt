@@ -1,0 +1,27 @@
+[MQTT]
+
+SERVER = 192.168.1.1
+PORT = 1883
+QOS = 1
+TIMEOUT = 5
+USER = mqttuser
+PASS = mqttpass
+
+[TAPTAP]
+BINARY = ./taptap
+ADDRESS = 192.168.1.50
+PORT = 502
+TIMEOUT = 180
+UPDATE = 10
+CCA_NAME = tigo1
+MODULE_IDS = 2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17
+MODULE_NAMES = A01,A02,A03,A04,A05,A06,A07,A08,A09,A10,A11,A12,A13,A14,A15,A16
+
+[HA]
+DISCOVERY_PREFIX = homeassistant
+BIRTH_TOPIC = homeassistant/status
+TAPTAP_PREFIX = taptap/state
+
+[RUNTIME]
+MAX_ERROR = 15
+STATE_FILE = /run/taptap/taptap.state
