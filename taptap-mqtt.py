@@ -135,6 +135,7 @@ def taptap_tele(mode):
 
     # check taptap process is alive
     if taptap.poll() is not None:
+        print("TapTap process is not running!")
         raise AppError("TapTap process is not running!")
 
     # line = taptap.stdout.readline()
@@ -218,6 +219,7 @@ def taptap_tele(mode):
         for node_id in nodes.keys():
             node_name = nodes[node_id]
             if not node_name in state["nodes"]:
+                # Init default values
                 state["nodes"][node_name] = {
                     "gateway_id": 0,
                     "state": "offline",
@@ -233,6 +235,7 @@ def taptap_tele(mode):
                 }
                 state["nodes"][node_name]["node_id"] = node_id
             elif (
+                # Node went offline, reset values
                 state["nodes"][node_name]["tmstp"] + int(config["TAPTAP"]["TIMEOUT"])
                 < now
             ):
@@ -249,6 +252,7 @@ def taptap_tele(mode):
                     }
                 )
             else:
+                # Node is online
                 state["nodes"][node_name]["state"] = "online"
                 state["nodes"][node_name]["power"] = round(
                     state["nodes"][node_name]["voltage_out"]
@@ -282,7 +286,7 @@ def taptap_tele(mode):
                             ]
                 online_nodes += 1
 
-        # calculate average and set state
+        # calculate averages and set device state
         if online_nodes > 0:
             state["state"] = "online"
             for sensor in stats_sensors:
@@ -305,6 +309,9 @@ def taptap_tele(mode):
         if client.connected_flag:
             client.publish(state_topic, json.dumps(state), int(config["MQTT"]["QOS"]))
             lasttele = now
+        else:
+            print("MQTT not connected!")
+            raise MqttError("MQTT not connected!")
 
 
 def taptap_discovery():
@@ -326,26 +333,28 @@ def taptap_discovery():
         "url": "https://github.com/litinoveweedle/taptap2mqtt",
     }
 
-    # node_list
+    # statistic sensors components
     discovery["components"] = {}
     for sensor in stats_sensors:
-        sensor_id = config["TAPTAP"]["CCA_NAME"] + "_" + sensor
-        sensor_uuid = str(uuid.uuid5(uuid.NAMESPACE_URL, sensor_id))
-        discovery["components"][sensor_id] = {
-            "p": "sensor",
-            "unique_id": sensor_uuid,
-            "object_id": sensor_id,
-            "device_class": sensors[sensor]["class"],
-            "unit_of_measurement": sensors[sensor]["unit"],
-            "state_topic": state_topic,
-            "value_template": "{{ value_json.nodes." + sensor + " }}",
-            "availability_mode": "all",
-            "availability": [
-                {"topic": lwt_topic},
-                {"topic": state_topic, "value_template": "{{ value_json.state }}"},
-            ],
-        }
+        for op in stats_ops:
+            sensor_id = config["TAPTAP"]["CCA_NAME"] + "_" + sensor + "_" + op
+            sensor_uuid = str(uuid.uuid5(uuid.NAMESPACE_URL, sensor_id))
+            discovery["components"][sensor_id] = {
+                "p": "sensor",
+                "unique_id": sensor_uuid,
+                "object_id": sensor_id,
+                "device_class": sensors[sensor]["class"],
+                "unit_of_measurement": sensors[sensor]["unit"],
+                "state_topic": state_topic,
+                "value_template": "{{ value_json.stats." + sensor + "_" + op + " }}",
+                "availability_mode": "all",
+                "availability": [
+                    {"topic": lwt_topic},
+                    {"topic": state_topic, "value_template": "{{ value_json.state }}"},
+                ],
+            }
 
+    # node sensors components
     for node_name in nodes.values():
         node_id = config["TAPTAP"]["CCA_NAME"] + "_" + node_name
         for sensor in sensors.keys():
@@ -385,6 +394,9 @@ def taptap_discovery():
         client.publish(
             discovery_topic, json.dumps(discovery), int(config["MQTT"]["QOS"])
         )
+    else:
+        print("MQTT not connected!")
+        raise MqttError("MQTT not connected!")
 
 
 def taptap_init():
@@ -450,6 +462,7 @@ def mqtt_init():
         if client.reconnect_count > 10:
             print("MQTT not connected!")
             raise MqttError("MQTT not connected!")
+        time.sleep(3)
 
     # Subscribe for homeassistant birth messages
     client.subscribe(config["HA"]["BIRTH_TOPIC"])
