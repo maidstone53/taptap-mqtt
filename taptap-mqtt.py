@@ -512,8 +512,17 @@ def mqtt_on_message(client, userdata, msg):
 def state_file(mode):
     if mode:
         if int(config["RUNTIME"]["MAX_ERROR"]) > 0 and config["RUNTIME"]["STATE_FILE"]:
-            with open(config["RUNTIME"]["STATE_FILE"], "a"):
-                os.utime(config["RUNTIME"]["STATE_FILE"], None)
+            path = os.path.split(config["RUNTIME"]["STATE_FILE"])
+            try:
+                # Create stat file directory if not exists
+                if not os.path.isdir(path[0]):
+                    os.makedirs(path[0], exist_ok=True)
+                # Write stats file
+                with open(config["RUNTIME"]["STATE_FILE"], "a"):
+                    os.utime(config["RUNTIME"]["STATE_FILE"], None)
+            except IOError as error:
+                print(f"Unable to write to file: {config['RUNTIME']['STATE_FILE']} error: {error}")
+                exit(1)
     elif os.path.isfile(config["RUNTIME"]["STATE_FILE"]):
         os.remove(config["RUNTIME"]["STATE_FILE"])
 
