@@ -1,27 +1,49 @@
 [MQTT]
+# IP address of the MQTT server
 SERVER = 192.168.1.1
+# IP port of the MQTT server
 PORT = 1883
+# MQTT QoS level
 QOS = 1
+# MQTT timeout
 TIMEOUT = 5
+# MQTT username
 USER = mqttuser
+# MQTT password
 PASS = mqttpass
-TAPTAP_PREFIX = taptap/state
-TAPTAP_NAME = tigo1
 
 [TAPTAP]
+# Path to the taptap binary
 BINARY = ./taptap
+# serial device to use like /dev/ACM0, set empty if using Modbus to Ethernet to Modbus convertor
+SERIAL = 
+# IP address of the Ethernet to Modbus convertor, set empty if using usb/serial Modus convertor
 ADDRESS = 192.168.1.50
+# IP port of the Ethernet to Modbus convertor, typically 502
 PORT = 502
-TIMEOUT = 180
-UPDATE = 10
+# list of the Tigo modules ids, these typically starts at 2
 MODULE_IDS = 2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17
+# friendly names to be used in for the Tigo modules
 MODULE_NAMES = A01,A02,A03,A04,A05,A06,A07,A08,A09,A10,A11,A12,A13,A14,A15,A16
+# prefix for TapTap MQTT state topic to messages
+TOPIC_PREFIX = taptap/state
+# name to be use in the TapTap MQTT state topic
+TOPIC_NAME = tigo1
+# time after which Tigo module is declared offline if no message is received
+TIMEOUT = 180
+# how often MQTT state topic shall be updated
+UPDATE = 10
 
 [HA]
+# MQTT topic to post Home Assistant discovery message, set empty to disable MQTT discovery
 DISCOVERY_PREFIX = homeassistant
+# MQTT topic to monitor home Assistant to come online to re-post discovery message, set empty to disable this feature
 BIRTH_TOPIC = homeassistant/status
+# do not render home Assistant entities 'UNAVAILABLE' if no message received within TIMEOUT, se to 'true' or 'false'
 ENTITY_AVAILABILITY = true
 
 [RUNTIME]
+# after how many recoverable errors application will terminate, set to 0 for unlimited
 MAX_ERROR = 15
+# application state file to be used by external watchdog, application update it regularly with the UNIX timestamp if running
 STATE_FILE = /run/taptap/taptap.state

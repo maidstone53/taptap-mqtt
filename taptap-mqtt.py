@@ -38,8 +38,6 @@ if "MQTT" in config:
         "TIMEOUT",
         "USER",
         "PASS",
-        "TAPTAP_PREFIX",
-        "TAPTAP_NAME",
     ]:
         if not config["MQTT"][key]:
             print("Missing or empty config entry MQTT/" + key)
@@ -51,16 +49,30 @@ else:
 if "TAPTAP" in config:
     for key in [
         "BINARY",
+        "SERIAL",
         "ADDRESS",
         "PORT",
-        "TIMEOUT",
-        "UPDATE",
         "MODULE_IDS",
         "MODULE_NAMES",
+        "TOPIC_PREFIX",
+        "TOPIC_NAME",
+        "TIMEOUT",
+        "UPDATE",
     ]:
-        if not config["TAPTAP"][key]:
-            print("Missing or empty config entry TAPTAP/" + key)
-            exit(1)
+        if key not in config["TAPTAP"] or not config["TAPTAP"][key]:
+            if key in ["SERIAL", "ADDRESS"]:
+                config["TAPTAP"][key] = ""
+            else:
+                print("Missing or empty config entry TAPTAP/" + key)
+                exit(1)
+
+    if (
+        (not config["TAPTAP"]["SERIAL"] and not config["TAPTAP"]["ADDRESS"])
+        or (config["TAPTAP"]["SERIAL"] and config["TAPTAP"]["ADDRESS"])
+        or (config["TAPTAP"]["ADDRESS"] and not config["TAPTAP"]["PORT"])
+    ):
+        print("Either TAPTAP SERIAL or ADDRESS and PORT shall be set!")
+        exit(1)
 else:
     print("Missing config section TAPTAP")
     exit(1)
@@ -71,13 +83,13 @@ if "HA" in config:
         "BIRTH_TOPIC",
         "ENTITY_AVAILABILITY",
     ]:
-        if not config["HA"][key]:
-            print("Missing or empty config entry RUNTIME/" + key)
+        if key not in config["HA"]:
+            print("Missing config entry HA/" + key)
             exit(1)
 
 if "RUNTIME" in config:
     for key in ["MAX_ERROR", "STATE_FILE"]:
-        if not config["RUNTIME"][key]:
+        if key not in config["RUNTIME"] or not config["RUNTIME"][key]:
             print("Missing or empty config entry RUNTIME/" + key)
             exit(1)
 else:
@@ -124,15 +136,15 @@ sensors = {
 nodes = dict(zip(node_ids, node_names))
 
 lwt_topic = (
-    config["MQTT"]["TAPTAP_PREFIX"] + "/" + config["MQTT"]["TAPTAP_NAME"] + "/lwt"
+    config["TAPTAP"]["TOPIC_PREFIX"] + "/" + config["TAPTAP"]["TOPIC_NAME"] + "/lwt"
 )
 state_topic = (
-    config["MQTT"]["TAPTAP_PREFIX"] + "/" + config["MQTT"]["TAPTAP_NAME"] + "/state"
+    config["TAPTAP"]["TOPIC_PREFIX"] + "/" + config["TAPTAP"]["TOPIC_NAME"] + "/state"
 )
 discovery_topic = (
     config["HA"]["DISCOVERY_PREFIX"]
     + "/device/"
-    + config["MQTT"]["TAPTAP_NAME"]
+    + config["TAPTAP"]["TOPIC_NAME"]
     + "/config"
 )
 
@@ -334,9 +346,9 @@ def taptap_discovery():
     discovery = {}
     discovery["device"] = {
         "ids": str(
-            uuid.uuid5(uuid.NAMESPACE_URL, "taptap_" + config["MQTT"]["TAPTAP_NAME"])
+            uuid.uuid5(uuid.NAMESPACE_URL, "taptap_" + config["TAPTAP"]["TOPIC_NAME"])
         ),
-        "name": config["MQTT"]["TAPTAP_NAME"].title(),
+        "name": config["TAPTAP"]["TOPIC_NAME"].title(),
         "mf": "Tigo",
         "mdl": "Tigo CCA",
     }
@@ -352,7 +364,7 @@ def taptap_discovery():
     discovery["components"] = {}
     for sensor in stats_sensors:
         for op in stats_ops:
-            sensor_id = config["MQTT"]["TAPTAP_NAME"] + "_" + sensor + "_" + op
+            sensor_id = config["TAPTAP"]["TOPIC_NAME"] + "_" + sensor + "_" + op
             sensor_uuid = str(uuid.uuid5(uuid.NAMESPACE_URL, sensor_id))
             discovery["components"][sensor_id] = {
                 "p": "sensor",
@@ -384,7 +396,7 @@ def taptap_discovery():
 
     # node sensors components
     for node_name in nodes.values():
-        node_id = config["MQTT"]["TAPTAP_NAME"] + "_" + node_name
+        node_id = config["TAPTAP"]["TOPIC_NAME"] + "_" + node_name
         for sensor in sensors.keys():
             sensor_id = node_id + "_" + sensor
             sensor_uuid = str(uuid.uuid5(uuid.NAMESPACE_URL, sensor_id))
@@ -442,17 +454,32 @@ def taptap_init():
     global taptap
 
     # Initialize taptap process
-    taptap = subprocess.Popen(
-        [
-            config["TAPTAP"]["BINARY"],
-            "observe",
-            "--tcp",
-            config["TAPTAP"]["ADDRESS"],
-            "--port",
-            config["TAPTAP"]["PORT"],
-        ],
-        stdout=subprocess.PIPE,
-    )
+    if config["TAPTAP"]["SERIAL"]:
+        taptap = subprocess.Popen(
+            [
+                config["TAPTAP"]["BINARY"],
+                "observe",
+                "--serial",
+                config["TAPTAP"]["SERIAL"],
+            ],
+            stdout=subprocess.PIPE,
+        )
+    elif config["TAPTAP"]["ADDRESS"]:
+        taptap = subprocess.Popen(
+            [
+                config["TAPTAP"]["BINARY"],
+                "observe",
+                "--tcp",
+                config["TAPTAP"]["ADDRESS"],
+                "--port",
+                config["TAPTAP"]["PORT"],
+            ],
+            stdout=subprocess.PIPE,
+        )
+    else:
+        print("Either TAPTAP SERIAL or ADDRESS and PORT shall be set!")
+        exit(1)
+
     # Set stdout as non blocking
     os.set_blocking(taptap.stdout.fileno(), False)
 
@@ -481,7 +508,7 @@ def mqtt_init():
     client.on_connect = mqtt_on_connect
     # Register disconnect callback
     client.on_disconnect = mqtt_on_disconnect
-    # Registed publish message callback
+    # Register publish message callback
     client.on_message = mqtt_on_message
     # Set access token
     client.username_pw_set(config["MQTT"]["USER"], config["MQTT"]["PASS"])
@@ -504,7 +531,8 @@ def mqtt_init():
         time.sleep(3)
 
     # Subscribe for homeassistant birth messages
-    client.subscribe(config["HA"]["BIRTH_TOPIC"])
+    if config["HA"]["BIRTH_TOPIC"]:
+        client.subscribe(config["HA"]["BIRTH_TOPIC"])
 
 
 def mqtt_cleanup():
@@ -513,7 +541,8 @@ def mqtt_cleanup():
     if client:
         client.loop_stop()
         if client.connected_flag:
-            client.unsubscribe(config["HA"]["BIRTH_TOPIC"])
+            if config["HA"]["BIRTH_TOPIC"]:
+                client.unsubscribe(config["HA"]["BIRTH_TOPIC"])
             client.disconnect()
         del client
 
@@ -539,14 +568,14 @@ def mqtt_on_message(client, userdata, msg):
     topic = str(msg.topic)
     payload = str(msg.payload.decode("utf-8"))
     match_birth = re.match(r"^" + config["HA"]["BIRTH_TOPIC"] + "$", topic)
-    if match_birth:
+    if config["HA"]["BIRTH_TOPIC"] and match_birth:
         # discovery
         taptap_discovery()
     else:
         print("Unknown topic: " + topic + ", message: " + payload)
 
 
-# touch state file on succesfull run
+# touch state file on successful run
 def state_file(mode):
     if mode:
         if int(config["RUNTIME"]["MAX_ERROR"]) > 0 and config["RUNTIME"]["STATE_FILE"]:
@@ -615,7 +644,7 @@ while True:
             mqtt_cleanup()
             taptap_cleanup()
             state_file(0)
-            # Gracefull shutwdown
+            # Graceful shutdown
             sys.exit(0)
         else:
             # Exit with error
