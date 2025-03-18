@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 
 # define user-defined exception
 class AppError(Exception):
-    "Raised on aplication error"
+    "Raised on application error"
 
     pass
 
@@ -109,11 +109,6 @@ sensors = {
     "rssi": {"class": "signal_strength", "unit": "dB"},
     "timestamp": {"class": "timestamp", "unit": None},
 }
-state["stats"] = dict(
-    zip(
-        stats_sensors, [dict(zip(stats_ops, [0] * len(stats_ops)))] * len(stats_sensors)
-    )
-)
 nodes = dict(zip(node_ids, node_names))
 
 lwt_topic = config["HA"]["TAPTAP_PREFIX"] + "/" + config["TAPTAP"]["CCA_NAME"] + "/lwt"
@@ -213,7 +208,9 @@ def taptap_tele(mode):
 
     if mode or lasttele + int(config["TAPTAP"]["UPDATE"]) < now:
         online_nodes = 0
+        # Init statistic values
         for sensor in stats_sensors:
+            state["stats"][sensor] = {}
             for op in stats_ops:
                 state["stats"][sensor][op] = 0
 
