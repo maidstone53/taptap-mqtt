@@ -93,16 +93,15 @@ stats_sensors = [
     "voltage_in",
     "voltage_out",
     "current",
+    "power",
     "duty_cycle",
     "temperature",
     "rssi",
-    "power",
 ]
 sensors = {
     "voltage_in": {"class": "voltage", "unit": "V"},
     "voltage_out": {"class": "voltage", "unit": "V"},
     "current": {"class": "current", "unit": "A"},
-    "voltage_in": {"class": "volatage", "unit": "V"},
     "power": {"class": "power", "unit": "W"},
     "temperature": {"class": "temperature", "unit": "°C"},
     "duty_cycle": {"class": "power_factor", "unit": "%"},
@@ -172,6 +171,7 @@ def taptap_tele(mode):
                     print(f"Unknown node id: {data[name]['id']}")
                     break
                 data[name + "_id"] = data[name]["id"]
+                del data[name]
             elif name in [
                 "voltage_in",
                 "voltage_out",
@@ -223,7 +223,7 @@ def taptap_tele(mode):
                 state["nodes"][node_name] = {
                     "gateway_id": 0,
                     "state": "offline",
-                    "timestamp": 0,
+                    "timestamp": datetime.datetime.fromtimestamp(0).isoformat(),
                     "tmstp": 0,
                     "voltage_in": 0,
                     "voltage_out": 0,
@@ -341,12 +341,13 @@ def taptap_discovery():
             sensor_uuid = str(uuid.uuid5(uuid.NAMESPACE_URL, sensor_id))
             discovery["components"][sensor_id] = {
                 "p": "sensor",
+                "name": sensor_id.replace("_", " ").title(),
                 "unique_id": sensor_uuid,
                 "object_id": sensor_id,
                 "device_class": sensors[sensor]["class"],
                 "unit_of_measurement": sensors[sensor]["unit"],
                 "state_topic": state_topic,
-                "value_template": "{{ value_json.stats." + sensor + "_" + op + " }}",
+                "value_template": "{{ value_json.stats." + sensor + "." + op + " }}",
                 "availability_mode": "all",
                 "availability": [
                     {"topic": lwt_topic},
@@ -362,6 +363,7 @@ def taptap_discovery():
             sensor_uuid = str(uuid.uuid5(uuid.NAMESPACE_URL, sensor_id))
             discovery["components"][sensor_id] = {
                 "p": "sensor",
+                "name": sensor_id.replace("_", " ").title(),
                 "unique_id": sensor_uuid,
                 "object_id": sensor_id,
                 "device_class": sensors[sensor]["class"],
@@ -500,16 +502,9 @@ def mqtt_on_message(client, userdata, msg):
     topic = str(msg.topic)
     payload = str(msg.payload.decode("utf-8"))
     match_birth = re.match(r"^" + config["HA"]["BIRTH_TOPIC"] + "$", topic)
-    match_cmnd = re.match(r"^" + config["HA"]["CMD_TOPIC"] + "\/cmnd\/(state)$", topic)
     if match_birth:
         # discovery
         taptap_discovery()
-    elif match_cmnd:
-        topic = match_cmnd.group(1)
-        if topic == "state" and payload == "":
-            taptap_tele(1)
-        else:
-            print("Unknown topic: " + topic + ", message: " + payload)
     else:
         print("Unknown topic: " + topic + ", message: " + payload)
 
