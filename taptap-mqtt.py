@@ -314,8 +314,10 @@ def taptap_tele(mode):
 
 
 def taptap_discovery():
-    discovery = {}
+    if not config["HA"]["DISCOVERY_PREFIX"]:
+        return
 
+    discovery = {}
     discovery["device"] = {
         "ids": str(
             uuid.uuid5(uuid.NAMESPACE_URL, "taptap_" + config["TAPTAP"]["CCA_NAME"])
@@ -521,7 +523,9 @@ def state_file(mode):
                 with open(config["RUNTIME"]["STATE_FILE"], "a"):
                     os.utime(config["RUNTIME"]["STATE_FILE"], None)
             except IOError as error:
-                print(f"Unable to write to file: {config['RUNTIME']['STATE_FILE']} error: {error}")
+                print(
+                    f"Unable to write to file: {config['RUNTIME']['STATE_FILE']} error: {error}"
+                )
                 exit(1)
     elif os.path.isfile(config["RUNTIME"]["STATE_FILE"]):
         os.remove(config["RUNTIME"]["STATE_FILE"])
