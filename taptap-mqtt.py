@@ -31,7 +31,16 @@ class MqttError(Exception):
 config = configparser.ConfigParser()
 config.read("config.ini")
 if "MQTT" in config:
-    for key in ["SERVER", "PORT", "QOS", "TIMEOUT", "USER", "PASS"]:
+    for key in [
+        "SERVER",
+        "PORT",
+        "QOS",
+        "TIMEOUT",
+        "USER",
+        "PASS",
+        "TAPTAP_PREFIX",
+        "TAPTAP_NAME",
+    ]:
         if not config["MQTT"][key]:
             print("Missing or empty config entry MQTT/" + key)
             exit(1)
@@ -46,7 +55,6 @@ if "TAPTAP" in config:
         "PORT",
         "TIMEOUT",
         "UPDATE",
-        "CCA_NAME",
         "MODULE_IDS",
         "MODULE_NAMES",
     ]:
@@ -61,7 +69,6 @@ if "HA" in config:
     for key in [
         "DISCOVERY_PREFIX",
         "BIRTH_TOPIC",
-        "TAPTAP_PREFIX",
         "ENTITY_AVAILABILITY",
     ]:
         if not config["HA"][key]:
@@ -116,14 +123,16 @@ sensors = {
 }
 nodes = dict(zip(node_ids, node_names))
 
-lwt_topic = config["HA"]["TAPTAP_PREFIX"] + "/" + config["TAPTAP"]["CCA_NAME"] + "/lwt"
+lwt_topic = (
+    config["MQTT"]["TAPTAP_PREFIX"] + "/" + config["MQTT"]["TAPTAP_NAME"] + "/lwt"
+)
 state_topic = (
-    config["HA"]["TAPTAP_PREFIX"] + "/" + config["TAPTAP"]["CCA_NAME"] + "/state"
+    config["MQTT"]["TAPTAP_PREFIX"] + "/" + config["MQTT"]["TAPTAP_NAME"] + "/state"
 )
 discovery_topic = (
     config["HA"]["DISCOVERY_PREFIX"]
     + "/device/"
-    + config["TAPTAP"]["CCA_NAME"]
+    + config["MQTT"]["TAPTAP_NAME"]
     + "/config"
 )
 
@@ -325,9 +334,9 @@ def taptap_discovery():
     discovery = {}
     discovery["device"] = {
         "ids": str(
-            uuid.uuid5(uuid.NAMESPACE_URL, "taptap_" + config["TAPTAP"]["CCA_NAME"])
+            uuid.uuid5(uuid.NAMESPACE_URL, "taptap_" + config["MQTT"]["TAPTAP_NAME"])
         ),
-        "name": config["TAPTAP"]["CCA_NAME"].title(),
+        "name": config["MQTT"]["TAPTAP_NAME"].title(),
         "mf": "Tigo",
         "mdl": "Tigo CCA",
     }
@@ -343,7 +352,7 @@ def taptap_discovery():
     discovery["components"] = {}
     for sensor in stats_sensors:
         for op in stats_ops:
-            sensor_id = config["TAPTAP"]["CCA_NAME"] + "_" + sensor + "_" + op
+            sensor_id = config["MQTT"]["TAPTAP_NAME"] + "_" + sensor + "_" + op
             sensor_uuid = str(uuid.uuid5(uuid.NAMESPACE_URL, sensor_id))
             discovery["components"][sensor_id] = {
                 "p": "sensor",
@@ -375,7 +384,7 @@ def taptap_discovery():
 
     # node sensors components
     for node_name in nodes.values():
-        node_id = config["TAPTAP"]["CCA_NAME"] + "_" + node_name
+        node_id = config["MQTT"]["TAPTAP_NAME"] + "_" + node_name
         for sensor in sensors.keys():
             sensor_id = node_id + "_" + sensor
             sensor_uuid = str(uuid.uuid5(uuid.NAMESPACE_URL, sensor_id))
@@ -557,9 +566,11 @@ def state_file(mode):
     elif os.path.isfile(config["RUNTIME"]["STATE_FILE"]):
         os.remove(config["RUNTIME"]["STATE_FILE"])
 
+
 def str_to_bool(string):
     """Converts `s` to boolean. Assumes `s` is case-insensitive."""
-    return string.lower() in ['true', '1', 't', 'y', 'yes']
+    return string.lower() in ["true", "1", "t", "y", "yes"]
+
 
 # Add connection flags
 mqtt.Client.connected_flag = 0
