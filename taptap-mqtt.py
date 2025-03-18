@@ -58,7 +58,12 @@ else:
     exit(1)
 
 if "HA" in config:
-    for key in ["DISCOVERY_PREFIX", "BIRTH_TOPIC", "TAPTAP_PREFIX"]:
+    for key in [
+        "DISCOVERY_PREFIX",
+        "BIRTH_TOPIC",
+        "TAPTAP_PREFIX",
+        "ENTITY_AVAILABILITY",
+    ]:
         if not config["HA"][key]:
             print("Missing or empty config entry RUNTIME/" + key)
             exit(1)
@@ -349,12 +354,24 @@ def taptap_discovery():
                 "unit_of_measurement": sensors[sensor]["unit"],
                 "state_topic": state_topic,
                 "value_template": "{{ value_json.stats." + sensor + "." + op + " }}",
-                "availability_mode": "all",
-                "availability": [
-                    {"topic": lwt_topic},
-                    {"topic": state_topic, "value_template": "{{ value_json.state }}"},
-                ],
             }
+            if str_to_bool(config["HA"]["ENTITY_AVAILABILITY"]):
+                discovery["components"][sensor_id].update(
+                    {
+                        "availability_mode": "all",
+                        "availability": [
+                            {"topic": lwt_topic},
+                            {
+                                "topic": state_topic,
+                                "value_template": "{{ value_json.state }}",
+                            },
+                        ],
+                    }
+                )
+            else:
+                discovery["components"][sensor_id].update(
+                    {"availability_topic": lwt_topic}
+                )
 
     # node sensors components
     for node_name in nodes.values():
@@ -375,17 +392,27 @@ def taptap_discovery():
                 + "."
                 + sensor
                 + " }}",
-                "availability_mode": "all",
-                "availability": [
-                    {"topic": lwt_topic},
-                    {
-                        "topic": state_topic,
-                        "value_template": "{{ value_json.nodes."
-                        + node_name
-                        + ".state }}",
-                    },
-                ],
             }
+
+            if str_to_bool(config["HA"]["ENTITY_AVAILABILITY"]):
+                discovery["components"][sensor_id].update(
+                    {
+                        "availability_mode": "all",
+                        "availability": [
+                            {"topic": lwt_topic},
+                            {
+                                "topic": state_topic,
+                                "value_template": "{{ value_json.nodes."
+                                + node_name
+                                + ".state }}",
+                            },
+                        ],
+                    }
+                )
+            else:
+                discovery["components"][sensor_id].update(
+                    {"availability_topic": lwt_topic}
+                )
 
     discovery["state_topic"] = state_topic
     discovery["qos"] = config["MQTT"]["QOS"]
@@ -530,6 +557,9 @@ def state_file(mode):
     elif os.path.isfile(config["RUNTIME"]["STATE_FILE"]):
         os.remove(config["RUNTIME"]["STATE_FILE"])
 
+def str_to_bool(string):
+    """Converts `s` to boolean. Assumes `s` is case-insensitive."""
+    return string.lower() in ['true', '1', 't', 'y', 'yes']
 
 # Add connection flags
 mqtt.Client.connected_flag = 0
