@@ -5,12 +5,13 @@ import configparser
 import json
 import time
 import uptime
-import datetime
 import os
 import sys
 import uuid
 import re
 import subprocess
+from dateutil import tz
+from datetime import datetime, timezone
 
 
 # define user-defined exception
@@ -193,7 +194,7 @@ def taptap_tele(mode):
                     print(f"Invalid key: {name} value: {data[name]}")
                     break
                 try:
-                    tmstp = datetime.datetime.strptime(
+                    tmstp = datetime.strptime(
                         data["timestamp"][0:26] + data["timestamp"][29:],
                         "%Y-%m-%dT%H:%M:%S.%f%z",
                     )
@@ -223,7 +224,7 @@ def taptap_tele(mode):
                 state["nodes"][node_name] = {
                     "gateway_id": 0,
                     "state": "offline",
-                    "timestamp": datetime.datetime.fromtimestamp(0).isoformat(),
+                    "timestamp": datetime.fromtimestamp(0, tz.tzlocal()).isoformat(),
                     "tmstp": 0,
                     "voltage_in": 0,
                     "voltage_out": 0,
@@ -304,7 +305,8 @@ def taptap_tele(mode):
         state["uptime"] = (
             result + ":" + "%02d" % (int(time_up / 60)) + ":" + "%02d" % (time_up % 60)
         )
-        state["time"] = datetime.datetime.now().isoformat()
+        # state["time"] = datetime.now(tz=tz.tzlocal()).isoformat()
+        state["time"] = datetime.fromtimestamp(now, tz.tzlocal()).isoformat()
 
         if client.connected_flag:
             client.publish(state_topic, json.dumps(state), int(config["MQTT"]["QOS"]))
@@ -321,7 +323,7 @@ def taptap_discovery():
         "ids": str(
             uuid.uuid5(uuid.NAMESPACE_URL, "taptap_" + config["TAPTAP"]["CCA_NAME"])
         ),
-        "name": config["TAPTAP"]["CCA_NAME"],
+        "name": config["TAPTAP"]["CCA_NAME"].title(),
         "mf": "Tigo",
         "mdl": "Tigo CCA",
     }
@@ -341,7 +343,7 @@ def taptap_discovery():
             sensor_uuid = str(uuid.uuid5(uuid.NAMESPACE_URL, sensor_id))
             discovery["components"][sensor_id] = {
                 "p": "sensor",
-                "name": sensor_id.replace("_", " ").title(),
+                "name": (sensor + " " + op).replace("_", " ").title(),
                 "unique_id": sensor_uuid,
                 "object_id": sensor_id,
                 "device_class": sensors[sensor]["class"],
@@ -363,7 +365,7 @@ def taptap_discovery():
             sensor_uuid = str(uuid.uuid5(uuid.NAMESPACE_URL, sensor_id))
             discovery["components"][sensor_id] = {
                 "p": "sensor",
-                "name": sensor_id.replace("_", " ").title(),
+                "name": (node_name + " " + sensor).replace("_", " ").title(),
                 "unique_id": sensor_uuid,
                 "object_id": sensor_id,
                 "device_class": sensors[sensor]["class"],
