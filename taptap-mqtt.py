@@ -180,6 +180,7 @@ def taptap_tele(mode):
         ]:
             if name not in data.keys():
                 print(f"Missing required key: {name}")
+                print(data)
                 break
             elif name in ["gateway", "node"]:
                 if not (
@@ -211,14 +212,23 @@ def taptap_tele(mode):
                     print(f"Invalid key: {name} value: {data[name]}")
                     break
             elif name == "timestamp":
-                if not (isinstance(data[name], str) and len(data[name]) == 35):
+                if not (isinstance(data[name], str) ):
                     print(f"Invalid key: {name} value: {data[name]}")
                     break
                 try:
-                    tmstp = datetime.strptime(
-                        data["timestamp"][0:26] + data["timestamp"][29:],
-                        "%Y-%m-%dT%H:%M:%S.%f%z",
-                    )
+                    if len(data[name]) == 35:
+                        tmstp = datetime.strptime(
+                            data[name][0:26] + data[name][29:],
+                            "%Y-%m-%dT%H:%M:%S.%f%z",
+                        )
+                    elif len(data[name]) == 32:
+                        tmstp = datetime.strptime(
+                            data[name],
+                            "%Y-%m-%dT%H:%M:%S.%f%z",
+                        )
+                    else:
+                        print(f"Invalid timestamp format: {data[name]}")
+                        break
                     data["timestamp"] = tmstp.isoformat()
                     data["tmstp"] = tmstp.timestamp()
                 except:
