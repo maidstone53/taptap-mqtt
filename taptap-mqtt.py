@@ -98,12 +98,12 @@ else:
 
 
 node_names = list(map(str.strip, config["TAPTAP"]["MODULE_NAMES"].lower().split(",")))
-if not len(node_names) or not (all([re.match("^\w+$", val) for val in node_names])):
+if not len(node_names) or not (all([re.match(r"^\w+$", val) for val in node_names])):
     print(f"MODULE_NAMES shall be comma separated list of modules names: {node_names}")
     exit(1)
 
 node_ids = list(map(str.strip, config["TAPTAP"]["MODULE_IDS"].split(",")))
-if not len(node_ids) or not (all([re.match("^\d+$", val) for val in node_ids])):
+if not len(node_ids) or not (all([re.match(r"^\d+$", val) for val in node_ids])):
     print(f"MODULE_IDS shall be comma separated list of modules IDs: {node_ids}")
     exit(1)
 
@@ -150,12 +150,12 @@ discovery_topic = (
 
 
 def taptap_tele(mode):
-    global lasttele
+    global last_tele
     global taptap
     now = time.time()
 
     # check taptap process is alive
-    if taptap.poll() is not None:
+    if not taptap or not taptap.stdout or taptap.poll() is not None:
         print("TapTap process is not running!")
         raise AppError("TapTap process is not running!")
 
@@ -212,7 +212,7 @@ def taptap_tele(mode):
                     print(f"Invalid key: {name} value: {data[name]}")
                     break
             elif name == "timestamp":
-                if not (isinstance(data[name], str) ):
+                if not (isinstance(data[name], str)):
                     print(f"Invalid key: {name} value: {data[name]}")
                     break
                 try:
@@ -242,7 +242,7 @@ def taptap_tele(mode):
                 ):
                     state["nodes"][nodes[str(data["node_id"])]] = data
 
-    if mode or lasttele + int(config["TAPTAP"]["UPDATE"]) < now:
+    if mode or last_tele + int(config["TAPTAP"]["UPDATE"]) < now:
         online_nodes = 0
         # Init statistic values
         for sensor in stats_sensors:
@@ -341,9 +341,9 @@ def taptap_tele(mode):
         # state["time"] = datetime.now(tz=tz.tzlocal()).isoformat()
         state["time"] = datetime.fromtimestamp(now, tz.tzlocal()).isoformat()
 
-        if client.connected_flag:
+        if client and client.connected_flag:
             client.publish(state_topic, json.dumps(state), int(config["MQTT"]["QOS"]))
-            lasttele = now
+            last_tele = now
         else:
             print("MQTT not connected!")
             raise MqttError("MQTT not connected!")
@@ -448,7 +448,7 @@ def taptap_discovery():
     discovery["state_topic"] = state_topic
     discovery["qos"] = config["MQTT"]["QOS"]
 
-    if client.connected_flag:
+    if client and client.connected_flag:
         # Sent LWT update
         client.publish(lwt_topic, payload="online", qos=0, retain=True)
         # Sent discovery
@@ -490,8 +490,12 @@ def taptap_init():
         print("Either TAPTAP SERIAL or ADDRESS and PORT shall be set!")
         exit(1)
 
-    # Set stdout as non blocking
-    os.set_blocking(taptap.stdout.fileno(), False)
+    if taptap and taptap.stdout:
+        # Set stdout as non blocking
+        os.set_blocking(taptap.stdout.fileno(), False)
+    else:
+        print("TapTap process is not running!")
+        raise AppError("TapTap process is not running!")
 
 
 def taptap_cleanup():
@@ -621,7 +625,7 @@ restart = 0
 while True:
     try:
         # Init counters
-        lasttele = 0
+        last_tele = 0
         # Create mqtt client
         if not client:
             # Init mqtt
