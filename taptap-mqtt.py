@@ -94,7 +94,7 @@ elif Path("config.ini").is_file():
     config.read("config.ini")
 else:
     print("No valid configuration file found/specified")
-    exit(0)
+    exit(1)
 
 for section in config_validation:
     if not section in config:
