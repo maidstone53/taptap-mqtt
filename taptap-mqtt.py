@@ -12,6 +12,7 @@ import re
 import subprocess
 from dateutil import tz
 from datetime import datetime, timezone
+from pathlib import Path
 
 
 # define user-defined exception
@@ -26,90 +27,6 @@ class MqttError(Exception):
 
     pass
 
-
-# read config
-config = configparser.ConfigParser()
-config.read("config.ini")
-if "MQTT" in config:
-    for key in [
-        "SERVER",
-        "PORT",
-        "QOS",
-        "TIMEOUT",
-        "USER",
-        "PASS",
-    ]:
-        if not config["MQTT"][key]:
-            print("Missing or empty config entry MQTT/" + key)
-            exit(1)
-else:
-    print("Missing config section MQTT")
-    exit(1)
-
-if "TAPTAP" in config:
-    for key in [
-        "BINARY",
-        "SERIAL",
-        "ADDRESS",
-        "PORT",
-        "MODULE_IDS",
-        "MODULE_NAMES",
-        "TOPIC_PREFIX",
-        "TOPIC_NAME",
-        "TIMEOUT",
-        "UPDATE",
-    ]:
-        if key not in config["TAPTAP"] or not config["TAPTAP"][key]:
-            if key in ["SERIAL", "ADDRESS"]:
-                config["TAPTAP"][key] = ""
-            else:
-                print("Missing or empty config entry TAPTAP/" + key)
-                exit(1)
-
-    if (
-        (not config["TAPTAP"]["SERIAL"] and not config["TAPTAP"]["ADDRESS"])
-        or (config["TAPTAP"]["SERIAL"] and config["TAPTAP"]["ADDRESS"])
-        or (config["TAPTAP"]["ADDRESS"] and not config["TAPTAP"]["PORT"])
-    ):
-        print("Either TAPTAP SERIAL or ADDRESS and PORT shall be set!")
-        exit(1)
-else:
-    print("Missing config section TAPTAP")
-    exit(1)
-
-if "HA" in config:
-    for key in [
-        "DISCOVERY_PREFIX",
-        "BIRTH_TOPIC",
-        "ENTITY_AVAILABILITY",
-    ]:
-        if key not in config["HA"]:
-            print("Missing config entry HA/" + key)
-            exit(1)
-
-if "RUNTIME" in config:
-    for key in ["MAX_ERROR", "STATE_FILE"]:
-        if key not in config["RUNTIME"] or not config["RUNTIME"][key]:
-            print("Missing or empty config entry RUNTIME/" + key)
-            exit(1)
-else:
-    print("Missing config section RUNTIME")
-    exit(1)
-
-
-node_names = list(map(str.strip, config["TAPTAP"]["MODULE_NAMES"].lower().split(",")))
-if not len(node_names) or not (all([re.match(r"^\w+$", val) for val in node_names])):
-    print(f"MODULE_NAMES shall be comma separated list of modules names: {node_names}")
-    exit(1)
-
-node_ids = list(map(str.strip, config["TAPTAP"]["MODULE_IDS"].split(",")))
-if not len(node_ids) or not (all([re.match(r"^\d+$", val) for val in node_ids])):
-    print(f"MODULE_IDS shall be comma separated list of modules IDs: {node_ids}")
-    exit(1)
-
-if len(node_ids) != len(node_names):
-    print("MODULE_IDS and MODULE_NAMES shall have same number of modules")
-    exit(1)
 
 # global variables
 state = {"time": 0, "uptime": 0, "state": "offline", "nodes": {}, "stats": {}}
@@ -133,6 +50,101 @@ sensors = {
     "rssi": {"class": "signal_strength", "unit": "dB"},
     "timestamp": {"class": "timestamp", "unit": None},
 }
+
+config_validation = {
+    "MQTT": {
+        "SERVER": r"^(((25[0-5]|(2[0-4]|1\d|[1-9]|)\d)\.?\b){4})|((([a-z0-9][a-z0-9\-]*[a-z0-9])|[a-z0-9]+\.)*([a-z]+|xn\-\-[a-z0-9]+)\.?)$",
+        "PORT": r"^\d+$",
+        "QOS": r"^[0-2]$",
+        "TIMEOUT": r"^\d+$",
+        "USER?": r".+",
+        "PASS?": r".+",
+    },
+    "TAPTAP": {
+        "BINARY": r"^(\.{0,2}\/)*(\w+\/)*taptap$",
+        "SERIAL?": r"^\/dev\/tty\w+$",
+        "ADDRESS?": r"^((25[0-5]|(2[0-4]|1\d|[1-9]|)\d)\.?\b){4}$",
+        "PORT": r"^\d+$",
+        "MODULE_IDS": r"^\s*\d+\s*(\,\s*\d+\s*)*$",
+        "MODULE_NAMES": r"^\s*\w+\s*(\,\s*\w+\s*)*$",
+        "TOPIC_PREFIX": r"^(\w+)(\/\w+)*",
+        "TOPIC_NAME": r"^(\w+)$",
+        "TIMEOUT": r"^\d+$",
+        "UPDATE": r"^\d+$",
+    },
+    "HA": {
+        "DISCOVERY_PREFIX": r"^(\w+)(\/\w+)*",
+        "BIRTH_TOPIC": r"^(\w+)(\/\w+)*",
+        "ENTITY_AVAILABILITY": r"^(true|false)$",
+    },
+    "RUNTIME": {
+        "MAX_ERROR": r"^\d+$",
+        "STATE_FILE?": r"^\/\w+(\/[\.\w]+)*$",
+    },
+}
+
+
+# read config
+config = configparser.ConfigParser()
+if len(sys.argv) > 1 and sys.argv[1] and Path(sys.argv[1]).is_file():
+    print("Reading config file: " + sys.argv[1])
+    config.read("config.ini")
+elif Path("config.ini").is_file():
+    print("Reading default config file: ./config.ini")
+    config.read("config.ini")
+else:
+    print("No valid configuration file found/specified")
+    exit(0)
+
+for section in config_validation:
+    if not section in config:
+        print("Missing config section: " + section)
+        exit(1)
+    for param1 in config_validation[section]:
+        optional = False
+        param2 = param1
+        if param1[-1:] == "?":
+            param2 = param1[:-1]
+            optional = True
+
+        if not param2 in config[section] or config[section][param2] is None:
+            print("Missing config parameter: " + param2)
+            exit(1)
+        elif config_validation[section][param1] and not re.match(
+            config_validation[section][param1], config[section][param2]
+        ):
+            if not (optional and not config[section][param2]):
+                print("Invalid config entry: " + section + "/" + param2)
+                exit(1)
+
+
+if not Path(config["TAPTAP"]["BINARY"]).is_file():
+    print("TATTAP BINARY doesn't exists!")
+    exit(1)
+
+if (
+    (not config["TAPTAP"]["SERIAL"] and not config["TAPTAP"]["ADDRESS"])
+    or (config["TAPTAP"]["SERIAL"] and config["TAPTAP"]["ADDRESS"])
+    or (config["TAPTAP"]["ADDRESS"] and not config["TAPTAP"]["PORT"])
+):
+    print("Either TAPTAP SERIAL or ADDRESS and PORT shall be set!")
+    exit(1)
+
+
+node_names = list(map(str.strip, config["TAPTAP"]["MODULE_NAMES"].lower().split(",")))
+if not len(node_names) or not (all([re.match(r"^\w+$", val) for val in node_names])):
+    print(f"MODULE_NAMES shall be comma separated list of modules names: {node_names}")
+    exit(1)
+
+node_ids = list(map(str.strip, config["TAPTAP"]["MODULE_IDS"].split(",")))
+if not len(node_ids) or not (all([re.match(r"^\d+$", val) for val in node_ids])):
+    print(f"MODULE_IDS shall be comma separated list of modules IDs: {node_ids}")
+    exit(1)
+
+if len(node_ids) != len(node_names):
+    print("MODULE_IDS and MODULE_NAMES shall have same number of modules")
+    exit(1)
+
 nodes = dict(zip(node_ids, node_names))
 
 lwt_topic = (
