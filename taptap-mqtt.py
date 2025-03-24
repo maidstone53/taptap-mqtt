@@ -88,7 +88,7 @@ config_validation = {
 config = configparser.ConfigParser()
 if len(sys.argv) > 1 and sys.argv[1] and Path(sys.argv[1]).is_file():
     print("Reading config file: " + sys.argv[1])
-    config.read("config.ini")
+    config.read(sys.argv[1])
 elif Path("config.ini").is_file():
     print("Reading default config file: ./config.ini")
     config.read("config.ini")
