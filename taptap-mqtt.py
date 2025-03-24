@@ -97,7 +97,7 @@ else:
     exit(1)
 
 for section in config_validation:
-    if not section in config:
+    if not section in config.sections():
         print("Missing config section: " + section)
         exit(1)
     for param1 in config_validation[section]:
