@@ -218,7 +218,7 @@ def taptap_tele(mode):
                     print(f"Invalid key: {name} value: {data[name]}")
                     break
                 if name == "dc_dc_duty_cycle":
-                    data["duty_cycle"] = round(data.pop("dc_dc_duty_cycle"), 2)
+                    data["duty_cycle"] = round(data.pop("dc_dc_duty_cycle") * 100, 2)
             elif name in ["rssi"]:
                 if not isinstance(data[name], int):
                     print(f"Invalid key: {name} value: {data[name]}")
