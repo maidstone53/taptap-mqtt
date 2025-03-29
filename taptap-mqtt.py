@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
-# define user-defined exception
+# Define user-defined exception
 class AppError(Exception):
     "Raised on application error"
 
@@ -28,7 +28,7 @@ class MqttError(Exception):
     pass
 
 
-# global variables
+# Global variables
 state = {"time": 0, "uptime": 0, "state": "offline", "nodes": {}, "stats": {}}
 stats_ops = ["min", "max", "avg"]
 stats_sensors = [
@@ -41,14 +41,14 @@ stats_sensors = [
     "rssi",
 ]
 sensors = {
-    "voltage_in": {"class": "voltage", "unit": "V"},
-    "voltage_out": {"class": "voltage", "unit": "V"},
-    "current": {"class": "current", "unit": "A"},
-    "power": {"class": "power", "unit": "W"},
-    "temperature": {"class": "temperature", "unit": "°C"},
-    "duty_cycle": {"class": "power_factor", "unit": "%"},
-    "rssi": {"class": "signal_strength", "unit": "dB"},
-    "timestamp": {"class": "timestamp", "unit": None},
+    "voltage_in": {"class": "voltage", "unit": "V", "round": 2},
+    "voltage_out": {"class": "voltage", "unit": "V", "round": 2},
+    "current": {"class": "current", "unit": "A", "round": 2},
+    "power": {"class": "power", "unit": "W", "round": 0},
+    "temperature": {"class": "temperature", "unit": "°C", "round": 1},
+    "duty_cycle": {"class": "power_factor", "unit": "%", "round": 0},
+    "rssi": {"class": "signal_strength", "unit": "dB", "round": 0},
+    "timestamp": {"class": "timestamp", "unit": None, "round": None},
 }
 
 config_validation = {
@@ -84,7 +84,7 @@ config_validation = {
 }
 
 
-# read config
+# Read config
 config = configparser.ConfigParser()
 if len(sys.argv) > 1 and sys.argv[1] and Path(sys.argv[1]).is_file():
     print("Reading config file: " + sys.argv[1])
@@ -145,8 +145,13 @@ if len(node_ids) != len(node_names):
     print("MODULE_IDS and MODULE_NAMES shall have same number of modules")
     exit(1)
 
+# Init nodes dictionary
 nodes = dict(zip(node_ids, node_names))
 
+# Init cache records
+cache = dict.fromkeys(node_names, {})
+
+# Init MQTT topics
 lwt_topic = (
     config["TAPTAP"]["TOPIC_PREFIX"] + "/" + config["TAPTAP"]["TOPIC_NAME"] + "/lwt"
 )
@@ -164,14 +169,15 @@ discovery_topic = (
 def taptap_tele(mode):
     global last_tele
     global taptap
+    global state
+    global cache
     now = time.time()
 
-    # check taptap process is alive
+    # Check taptap process is alive
     if not taptap or not taptap.stdout or taptap.poll() is not None:
         print("TapTap process is not running!")
         raise AppError("TapTap process is not running!")
 
-    # line = taptap.stdout.readline()
     for line in taptap.stdout:
         try:
             data = json.loads(line)
@@ -191,7 +197,7 @@ def taptap_tele(mode):
             "timestamp",
         ]:
             if name not in data.keys():
-                print(f"Missing required key: {name}")
+                print(f"Missing required key: '{name}'")
                 print(data)
                 break
             elif name in ["gateway", "node"]:
@@ -200,10 +206,10 @@ def taptap_tele(mode):
                     and "id" in data[name].keys()
                     and isinstance(data[name]["id"], int)
                 ):
-                    print(f"Invalid key: {name} value: {data[name]}")
+                    print(f"Invalid key: '{name}' value: '{data[name]}'")
                     break
                 if name == "node" and str(data[name]["id"]) not in nodes.keys():
-                    print(f"Unknown node id: {data[name]['id']}")
+                    print(f"Unknown node id: '{data[name]['id']}'")
                     break
                 data[name + "_id"] = data[name]["id"]
                 del data[name]
@@ -215,17 +221,20 @@ def taptap_tele(mode):
                 "temperature",
             ]:
                 if not isinstance(data[name], (float, int)):
-                    print(f"Invalid key: {name} value: {data[name]}")
+                    print(f"Invalid key: '{name}' value: '{data[name]}'")
                     break
                 if name == "dc_dc_duty_cycle":
                     data["duty_cycle"] = round(data.pop("dc_dc_duty_cycle") * 100, 2)
             elif name in ["rssi"]:
                 if not isinstance(data[name], int):
-                    print(f"Invalid key: {name} value: {data[name]}")
+                    print(f"Invalid key: '{name}' value: '{data[name]}'")
                     break
             elif name == "timestamp":
-                if not (isinstance(data[name], str)):
-                    print(f"Invalid key: {name} value: {data[name]}")
+                if not (isinstance(data[name], str)) and re.match(
+                    r"^\d{4}\-\d{2}\-\d{2}T\d{2}\:\d{2}\:\d{2}\.\d{6,9}\+\d{2}\:\d{2}$",
+                    data[name],
+                ):
+                    print(f"Invalid key: '{name}' value: '{data[name]}'")
                     break
                 try:
                     if len(data[name]) == 35:
@@ -239,20 +248,19 @@ def taptap_tele(mode):
                             "%Y-%m-%dT%H:%M:%S.%f%z",
                         )
                     else:
-                        print(f"Invalid timestamp format: {data[name]}")
+                        print(f"Invalid key 'timestamp' format: '{data[name]}'")
                         break
                     data["timestamp"] = tmstp.isoformat()
                     data["tmstp"] = tmstp.timestamp()
                 except:
-                    print(f"Invalid key: {name} value: {data[name]}")
+                    print(f"Invalid key: '{name}' value: '{data[name]}'")
                     break
-                # copy checked data into state struct
-                if (
-                    not nodes[str(data["node_id"])] in state["nodes"].keys()
-                    or state["nodes"][nodes[str(data["node_id"])]]["tmstp"]
-                    <= data["tmstp"]
-                ):
-                    state["nodes"][nodes[str(data["node_id"])]] = data
+                # Copy validated data into cache struct
+                if data["tmstp"] + int(config["TAPTAP"]["UPDATE"]) < now:
+                    print(f"Old 'timestamp' data detected : '{data[name]}'")
+                else:
+                    data["power"] = data["voltage_out"] * data["current"]
+                    cache[nodes[str(data["node_id"])]][data["tmstp"]] = data
 
     if mode or last_tele + int(config["TAPTAP"]["UPDATE"]) < now:
         online_nodes = 0
@@ -260,55 +268,51 @@ def taptap_tele(mode):
         for sensor in stats_sensors:
             state["stats"][sensor] = {}
             for op in stats_ops:
-                state["stats"][sensor][op] = 0
+                state["stats"][sensor][op] = None
 
         for node_id in nodes.keys():
             node_name = nodes[node_id]
-            if not node_name in state["nodes"]:
-                # Init default values
-                state["nodes"][node_name] = {
-                    "gateway_id": 0,
-                    "state": "offline",
-                    "timestamp": datetime.fromtimestamp(0, tz.tzlocal()).isoformat(),
-                    "tmstp": 0,
-                    "voltage_in": 0,
-                    "voltage_out": 0,
-                    "current": 0,
-                    "duty_cycle": 0,
-                    "temperature": 0,
-                    "rssi": 0,
-                    "power": 0,
-                }
-                state["nodes"][node_name]["node_id"] = node_id
-            elif (
-                # Node went offline, reset values
-                state["nodes"][node_name]["tmstp"] + int(config["TAPTAP"]["TIMEOUT"])
-                < now
-            ):
-                state["nodes"][node_name].update(
-                    {
-                        "state": "offline",
-                        "voltage_in": 0,
-                        "voltage_out": 0,
-                        "current": 0,
-                        "duty_cycle": 0,
-                        "temperature": 0,
-                        "rssi": 0,
-                        "power": 0,
-                    }
-                )
-            else:
-                # Node is online
+            if node_name in cache.keys() and len(cache[node_name]):
+                # Node is online - populate state struct
+                online_nodes += 1
+                last = max(cache[node_name].keys())
                 state["nodes"][node_name]["state"] = "online"
-                state["nodes"][node_name]["power"] = round(
-                    state["nodes"][node_name]["voltage_out"]
-                    * state["nodes"][node_name]["current"],
-                    1,
-                )
-                # calculate max, min and sum for average sensor
+                state["nodes"][node_name]["tmstp"] = cache[node_name][last]["tmstp"]
+                state["nodes"][node_name]["timestamp"] = cache[node_name][last][
+                    "timestamp"
+                ]
+
+                # Update state data
+                for sensor in sensors.keys():
+                    if sensors[sensor]["unit"]:
+                        # Calculate average for data smoothing
+                        sum = 0
+                        for tmstp in cache[node_name].keys():
+                            sum += cache[node_name][tmstp][sensor]
+                        state["nodes"][node_name][sensor] = sum / len(cache[node_name])
+                    else:
+                        # Take latest value
+                        state["nodes"][node_name][sensor] = cache[node_name][last][
+                            sensor
+                        ]
+                    if sensors[sensor]["round"] is not None:
+                        state["nodes"][node_name][sensor] = round(
+                            state["nodes"][node_name][sensor],
+                            sensors[sensor]["round"],
+                        )
+
+                # Reset cache
+                cache[node_name] = {}
+
+                # Calculate max, min and sum for average sensor
                 for sensor in stats_sensors:
+                    state["stats"][sensor]["avg"] = 0
                     for op in stats_ops:
-                        if op == "max":
+                        if state["stats"][sensor][op] is None:
+                            state["stats"][sensor][op] = state["nodes"][node_name][
+                                sensor
+                            ]
+                        elif op == "max":
                             if (
                                 online_nodes == 0
                                 or state["nodes"][node_name][sensor]
@@ -330,17 +334,55 @@ def taptap_tele(mode):
                             state["stats"][sensor][op] += state["nodes"][node_name][
                                 sensor
                             ]
-                online_nodes += 1
 
-        # calculate averages and set device state
+            elif not node_name in state["nodes"]:
+                # Node not online - init default values
+                state["nodes"][node_name] = {
+                    "node_id": node_id,
+                    "gateway_id": 0,
+                    "state": "offline",
+                    "timestamp": datetime.fromtimestamp(0, tz.tzlocal()).isoformat(),
+                    "tmstp": 0,
+                    "voltage_in": 0,
+                    "voltage_out": 0,
+                    "current": 0,
+                    "duty_cycle": 0,
+                    "temperature": 0,
+                    "rssi": 0,
+                    "power": 0,
+                }
+
+            elif (
+                state["nodes"][node_name]["tmstp"] + int(config["TAPTAP"]["TIMEOUT"])
+                < now
+            ):
+                # Node went recently offline - reset values
+                state["nodes"][node_name].update(
+                    {
+                        "state": "offline",
+                        "voltage_in": 0,
+                        "voltage_out": 0,
+                        "current": 0,
+                        "duty_cycle": 0,
+                        "temperature": 0,
+                        "rssi": 0,
+                        "power": 0,
+                    }
+                )
+
+        # Calculate averages and set device state
         if online_nodes > 0:
             state["state"] = "online"
             for sensor in stats_sensors:
-                state["stats"][sensor]["avg"] = round(
-                    state["stats"][sensor]["avg"] / online_nodes, 2
-                )
+                state["stats"][sensor]["avg"] /= online_nodes
+                if sensors[sensor]["round"] is not None:
+                    state["stats"][sensor]["avg"] = round(
+                        state["stats"][sensor]["avg"], sensors[sensor]["round"]
+                    )
         else:
-            state["state"] = "offline"
+            for sensor in stats_sensors:
+                for op in stats_ops:
+                    state["stats"][sensor][op] = 0
 
         time_up = uptime.uptime()
         result = "%01d" % int(time_up / 86400)
@@ -350,7 +392,6 @@ def taptap_tele(mode):
         state["uptime"] = (
             result + ":" + "%02d" % (int(time_up / 60)) + ":" + "%02d" % (time_up % 60)
         )
-        # state["time"] = datetime.now(tz=tz.tzlocal()).isoformat()
         state["time"] = datetime.fromtimestamp(now, tz.tzlocal()).isoformat()
 
         if client and client.connected_flag:
@@ -375,14 +416,14 @@ def taptap_discovery():
         "mdl": "Tigo CCA",
     }
 
-    # origin
+    # Origin
     discovery["origin"] = {
         "name": "TapTap MQTT Bridge",
         "sw": "0.1",
         "url": "https://github.com/litinoveweedle/taptap2mqtt",
     }
 
-    # statistic sensors components
+    # Statistic sensors components
     discovery["components"] = {}
     for sensor in stats_sensors:
         for op in stats_ops:
@@ -416,7 +457,7 @@ def taptap_discovery():
                     {"availability_topic": lwt_topic}
                 )
 
-    # node sensors components
+    # Node sensors components
     for node_name in nodes.values():
         node_id = config["TAPTAP"]["TOPIC_NAME"] + "_" + node_name
         for sensor in sensors.keys():
@@ -582,6 +623,7 @@ def mqtt_on_connect(client, userdata, flags, rc):
         client.connected_flag = 1
 
 
+# The callback for when the client receives a DISCONNECT from the server.
 def mqtt_on_disconnect(client, userdata, rc):
     client.connected_flag = 0
     if rc != 0:
@@ -601,7 +643,7 @@ def mqtt_on_message(client, userdata, msg):
         print("Unknown topic: " + topic + ", message: " + payload)
 
 
-# touch state file on successful run
+# Touch state file on successful run
 def state_file(mode):
     if mode:
         if int(config["RUNTIME"]["MAX_ERROR"]) > 0 and config["RUNTIME"]["STATE_FILE"]:
