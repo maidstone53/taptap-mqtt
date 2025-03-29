@@ -257,7 +257,9 @@ def taptap_tele(mode):
                     break
                 # Copy validated data into cache struct
                 if data["tmstp"] + int(config["TAPTAP"]["UPDATE"]) < now:
-                    print(f"Old 'timestamp' data detected : '{data[name]}'")
+                    diff = round(now - data["tmstp"], 1)
+                    print(f"Old data detected: '{data[name]}', time difference: '{diff}'s")
+                    break
                 else:
                     data["power"] = data["voltage_out"] * data["current"]
                     cache[nodes[str(data["node_id"])]][data["tmstp"]] = data
