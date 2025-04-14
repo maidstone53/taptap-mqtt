@@ -42,7 +42,6 @@ log_levels = {
     "debug": 0,
 }
 
-
 state = {"time": 0, "uptime": 0, "state": "offline", "nodes": {}, "stats": {}}
 stats_ops = ["min", "max", "avg"]
 stats_sensors = [
@@ -89,6 +88,7 @@ config_validation = {
     },
     "HA": {
         "DISCOVERY_PREFIX": r"^(\w+)(\/\w+)*",
+        "DISCOVERY_LEGACY": r"^(true|false)$",
         "BIRTH_TOPIC": r"^(\w+)(\/\w+)*",
         "ENTITY_AVAILABILITY": r"^(true|false)$",
     },
@@ -173,8 +173,11 @@ if len(node_ids) != len(node_names):
 # Init nodes dictionary
 nodes = dict(zip(node_ids, node_names))
 
-# Init cache records
+# Init cache struct
 cache = dict.fromkeys(node_names, {})
+
+# Init discovery struct
+discovery = None
 
 # Init MQTT topics
 lwt_topic = (
@@ -183,14 +186,9 @@ lwt_topic = (
 state_topic = (
     config["TAPTAP"]["TOPIC_PREFIX"] + "/" + config["TAPTAP"]["TOPIC_NAME"] + "/state"
 )
-discovery_topic = (
-    config["HA"]["DISCOVERY_PREFIX"]
-    + "/device/"
-    + config["TAPTAP"]["TOPIC_NAME"]
-    + "/config"
-)
 
 logging("debug", f"Configured nodes: {nodes}")
+
 
 def taptap_tele(mode):
     logging("debug", "Into taptap_tele")
@@ -213,7 +211,7 @@ def taptap_tele(mode):
             logging("warning", line)
             continue
 
-        logging("debug", "received taptap data")
+        logging("debug", "Received taptap data")
         logging("debug", line)
         for name in [
             "gateway",
@@ -321,7 +319,10 @@ def taptap_tele(mode):
             node_name = nodes[node_id]
             if node_name in cache.keys() and len(cache[node_name]):
                 # Node is online - populate state struct
-                if not node_name in state["nodes"] or state["nodes"][node_name]["state"] != "online":
+                if (
+                    not node_name in state["nodes"]
+                    or state["nodes"][node_name]["state"] != "online"
+                ):
                     logging("info", f"Node {node_name} came online")
                 else:
                     logging("debug", f"Node {node_name} is online")
@@ -426,7 +427,7 @@ def taptap_tele(mode):
         # Calculate averages and set device state
         if online_nodes > 0:
             if online_nodes < len(node_ids):
-                    logging("info", f"Only {online_nodes} nodes reported online")
+                logging("info", f"Only {online_nodes} nodes reported online")
             else:
                 logging("debug", f"{online_nodes} nodes reported online")
             state["state"] = "online"
@@ -465,114 +466,269 @@ def taptap_discovery():
     logging("debug", "Into taptap_discovery")
     if not config["HA"]["DISCOVERY_PREFIX"]:
         return
-
-    discovery = {}
-    discovery["device"] = {
-        "ids": str(
-            uuid.uuid5(uuid.NAMESPACE_URL, "taptap_" + config["TAPTAP"]["TOPIC_NAME"])
-        ),
-        "name": config["TAPTAP"]["TOPIC_NAME"].title(),
-        "mf": "Tigo",
-        "mdl": "Tigo CCA",
-    }
-
-    # Origin
-    discovery["origin"] = {
-        "name": "TapTap MQTT Bridge",
-        "sw": "0.1",
-        "url": "https://github.com/litinoveweedle/taptap2mqtt",
-    }
-
-    # Statistic sensors components
-    discovery["components"] = {}
-    for sensor in stats_sensors:
-        for op in stats_ops:
-            sensor_id = config["TAPTAP"]["TOPIC_NAME"] + "_" + sensor + "_" + op
-            sensor_uuid = str(uuid.uuid5(uuid.NAMESPACE_URL, sensor_id))
-            discovery["components"][sensor_id] = {
-                "p": "sensor",
-                "name": (sensor + " " + op).replace("_", " ").title(),
-                "unique_id": sensor_uuid,
-                "object_id": sensor_id,
-                "device_class": sensors[sensor]["class"],
-                "unit_of_measurement": sensors[sensor]["unit"],
-                "state_topic": state_topic,
-                "value_template": "{{ value_json.stats." + sensor + "." + op + " }}",
-            }
-            if str_to_bool(config["HA"]["ENTITY_AVAILABILITY"]):
-                discovery["components"][sensor_id].update(
-                    {
-                        "availability_mode": "all",
-                        "availability": [
-                            {"topic": lwt_topic},
-                            {
-                                "topic": state_topic,
-                                "value_template": "{{ value_json.state }}",
-                            },
-                        ],
-                    }
-                )
-            else:
-                discovery["components"][sensor_id].update(
-                    {"availability_topic": lwt_topic}
-                )
-
-    # Node sensors components
-    for node_name in nodes.values():
-        node_id = config["TAPTAP"]["TOPIC_NAME"] + "_" + node_name
-        for sensor in sensors.keys():
-            sensor_id = node_id + "_" + sensor
-            sensor_uuid = str(uuid.uuid5(uuid.NAMESPACE_URL, sensor_id))
-            discovery["components"][sensor_id] = {
-                "p": "sensor",
-                "name": (node_name + " " + sensor).replace("_", " ").title(),
-                "unique_id": sensor_uuid,
-                "object_id": sensor_id,
-                "device_class": sensors[sensor]["class"],
-                "unit_of_measurement": sensors[sensor]["unit"],
-                "state_topic": state_topic,
-                "value_template": "{{ value_json.nodes."
-                + node_name
-                + "."
-                + sensor
-                + " }}",
-            }
-
-            if str_to_bool(config["HA"]["ENTITY_AVAILABILITY"]):
-                discovery["components"][sensor_id].update(
-                    {
-                        "availability_mode": "all",
-                        "availability": [
-                            {"topic": lwt_topic},
-                            {
-                                "topic": state_topic,
-                                "value_template": "{{ value_json.nodes."
-                                + node_name
-                                + ".state }}",
-                            },
-                        ],
-                    }
-                )
-            else:
-                discovery["components"][sensor_id].update(
-                    {"availability_topic": lwt_topic}
-                )
-
-    discovery["state_topic"] = state_topic
-    discovery["qos"] = config["MQTT"]["QOS"]
-
-    if client and client.is_connected():
-        # Sent LWT update
-        logging("debug", f"Publish MQTT lwt topic {lwt_topic}")
-        client.publish(lwt_topic, payload="online", qos=0, retain=True)
-        # Sent discovery
-        logging("debug", f"Publish MQTT discovery topic {discovery_topic}")
-        client.publish(
-            discovery_topic, json.dumps(discovery), int(config["MQTT"]["QOS"])
-        )
+    if str_to_bool(config["HA"]["DISCOVERY_LEGACY"]):
+        taptap_discovery_legacy()
     else:
-        logging("error", "MQTT not connected!")
-        raise MqttError("MQTT not connected!")
+        taptap_discovery_device()
+
+
+def taptap_discovery_device():
+    logging("debug", "Into taptap_discovery_device")
+    global discovery
+
+    if discovery is None:
+        discovery = {}
+        discovery["device"] = {
+            "ids": str(
+                uuid.uuid5(
+                    uuid.NAMESPACE_URL, "taptap_" + config["TAPTAP"]["TOPIC_NAME"]
+                )
+            ),
+            "name": config["TAPTAP"]["TOPIC_NAME"].title(),
+            "mf": "Tigo",
+            "mdl": "Tigo CCA",
+        }
+
+        # Origin
+        discovery["origin"] = {
+            "name": "TapTap MQTT Bridge",
+            "sw": "0.1",
+            "url": "https://github.com/litinoveweedle/taptap2mqtt",
+        }
+
+        # Statistic sensors components
+        discovery["components"] = {}
+        for sensor in stats_sensors:
+            for op in stats_ops:
+                sensor_id = config["TAPTAP"]["TOPIC_NAME"] + "_" + sensor + "_" + op
+                sensor_uuid = str(uuid.uuid5(uuid.NAMESPACE_URL, sensor_id))
+                discovery["components"][sensor_id] = {
+                    "p": "sensor",
+                    "name": (sensor + " " + op).replace("_", " ").title(),
+                    "unique_id": sensor_uuid,
+                    "object_id": sensor_id,
+                    "device_class": sensors[sensor]["class"],
+                    "unit_of_measurement": sensors[sensor]["unit"],
+                    "state_topic": state_topic,
+                    "value_template": "{{ value_json.stats."
+                    + sensor
+                    + "."
+                    + op
+                    + " }}",
+                }
+                if str_to_bool(config["HA"]["ENTITY_AVAILABILITY"]):
+                    discovery["components"][sensor_id].update(
+                        {
+                            "availability_mode": "all",
+                            "availability": [
+                                {"topic": lwt_topic},
+                                {
+                                    "topic": state_topic,
+                                    "value_template": "{{ value_json.state }}",
+                                },
+                            ],
+                        }
+                    )
+                else:
+                    discovery["components"][sensor_id].update(
+                        {"availability_topic": lwt_topic}
+                    )
+
+        # Node sensors components
+        for node_name in nodes.values():
+            node_id = config["TAPTAP"]["TOPIC_NAME"] + "_" + node_name
+            for sensor in sensors.keys():
+                sensor_id = node_id + "_" + sensor
+                sensor_uuid = str(uuid.uuid5(uuid.NAMESPACE_URL, sensor_id))
+                discovery["components"][sensor_id] = {
+                    "p": "sensor",
+                    "name": (node_name + " " + sensor).replace("_", " ").title(),
+                    "unique_id": sensor_uuid,
+                    "object_id": sensor_id,
+                    "device_class": sensors[sensor]["class"],
+                    "unit_of_measurement": sensors[sensor]["unit"],
+                    "state_topic": state_topic,
+                    "value_template": "{{ value_json.nodes."
+                    + node_name
+                    + "."
+                    + sensor
+                    + " }}",
+                }
+
+                if str_to_bool(config["HA"]["ENTITY_AVAILABILITY"]):
+                    discovery["components"][sensor_id].update(
+                        {
+                            "availability_mode": "all",
+                            "availability": [
+                                {"topic": lwt_topic},
+                                {
+                                    "topic": state_topic,
+                                    "value_template": "{{ value_json.nodes."
+                                    + node_name
+                                    + ".state }}",
+                                },
+                            ],
+                        }
+                    )
+                else:
+                    discovery["components"][sensor_id].update(
+                        {"availability_topic": lwt_topic}
+                    )
+
+        discovery["state_topic"] = state_topic
+        discovery["qos"] = config["MQTT"]["QOS"]
+
+    if len(discovery):
+        if client and client.is_connected():
+            # Sent LWT update
+            logging("debug", f"Publish MQTT lwt topic {lwt_topic}")
+            client.publish(lwt_topic, payload="online", qos=0, retain=True)
+            # Sent discovery
+            discovery_topic = (
+                config["HA"]["DISCOVERY_PREFIX"]
+                + "/device/"
+                + config["TAPTAP"]["TOPIC_NAME"]
+                + "/config"
+            )
+            logging("debug", f"Publish MQTT discovery topic {discovery_topic}")
+            logging("debug", discovery)
+            client.publish(
+                discovery_topic,
+                json.dumps(discovery),
+                int(config["MQTT"]["QOS"]),
+            )
+        else:
+            print("MQTT not connected!")
+            raise MqttError("MQTT not connected!")
+
+
+def taptap_discovery_legacy():
+    logging("debug", "Into taptap_discovery_legacy")
+    global discovery
+
+    if discovery is None:
+        discovery = {}
+        device = {
+            "ids": str(
+                uuid.uuid5(
+                    uuid.NAMESPACE_URL, "taptap_" + config["TAPTAP"]["TOPIC_NAME"]
+                )
+            ),
+            "name": config["TAPTAP"]["TOPIC_NAME"].title(),
+            "mf": "Tigo",
+            "mdl": "Tigo CCA",
+        }
+
+        # Origin
+        origin = {
+            "name": "TapTap MQTT Bridge",
+            "sw": "0.1",
+            "url": "https://github.com/litinoveweedle/taptap2mqtt",
+        }
+
+        # Statistic sensors components
+        for sensor in stats_sensors:
+            for op in stats_ops:
+                sensor_id = config["TAPTAP"]["TOPIC_NAME"] + "_" + sensor + "_" + op
+                sensor_uuid = str(uuid.uuid5(uuid.NAMESPACE_URL, sensor_id))
+                discovery["sensor/" + sensor_id] = {
+                    "device": device,
+                    "origin": origin,
+                    "name": (sensor + " " + op).replace("_", " ").title(),
+                    "unique_id": sensor_uuid,
+                    "object_id": sensor_id,
+                    "device_class": sensors[sensor]["class"],
+                    "unit_of_measurement": sensors[sensor]["unit"],
+                    "state_topic": state_topic,
+                    "value_template": "{{ value_json.stats."
+                    + sensor
+                    + "."
+                    + op
+                    + " }}",
+                    "qos": config["MQTT"]["QOS"],
+                }
+                if str_to_bool(config["HA"]["ENTITY_AVAILABILITY"]):
+                    discovery["sensor/" + sensor_id].update(
+                        {
+                            "availability_mode": "all",
+                            "availability": [
+                                {"topic": lwt_topic},
+                                {
+                                    "topic": state_topic,
+                                    "value_template": "{{ value_json.state }}",
+                                },
+                            ],
+                        }
+                    )
+                else:
+                    discovery["sensor/" + sensor_id].update(
+                        {"availability_topic": lwt_topic}
+                    )
+
+        # Node sensors components
+        for node_name in nodes.values():
+            node_id = config["TAPTAP"]["TOPIC_NAME"] + "_" + node_name
+            for sensor in sensors.keys():
+                sensor_id = node_id + "_" + sensor
+                sensor_uuid = str(uuid.uuid5(uuid.NAMESPACE_URL, sensor_id))
+                discovery["sensor/" + sensor_id] = {
+                    "device": device,
+                    "origin": origin,
+                    "name": (node_name + " " + sensor).replace("_", " ").title(),
+                    "unique_id": sensor_uuid,
+                    "object_id": sensor_id,
+                    "device_class": sensors[sensor]["class"],
+                    "unit_of_measurement": sensors[sensor]["unit"],
+                    "state_topic": state_topic,
+                    "value_template": "{{ value_json.nodes."
+                    + node_name
+                    + "."
+                    + sensor
+                    + " }}",
+                    "qos": config["MQTT"]["QOS"],
+                }
+
+                if str_to_bool(config["HA"]["ENTITY_AVAILABILITY"]):
+                    discovery["sensor/" + sensor_id].update(
+                        {
+                            "availability_mode": "all",
+                            "availability": [
+                                {"topic": lwt_topic},
+                                {
+                                    "topic": state_topic,
+                                    "value_template": "{{ value_json.nodes."
+                                    + node_name
+                                    + ".state }}",
+                                },
+                            ],
+                        }
+                    )
+                else:
+                    discovery["sensor/" + sensor_id].update(
+                        {"availability_topic": lwt_topic}
+                    )
+
+    if len(discovery):
+        if client and client.is_connected():
+            # Sent LWT update
+            logging("debug", f"Publish MQTT lwt topic {lwt_topic}")
+            client.publish(lwt_topic, payload="online", qos=0, retain=True)
+        for component in discovery.keys():
+            if client and client.is_connected():
+                discovery_topic = (
+                    config["HA"]["DISCOVERY_PREFIX"] + "/" + component + "/config"
+                )
+                # Sent discovery
+                logging("debug", f"Publish MQTT discovery topic {discovery_topic}")
+                logging("debug", discovery[component])
+                client.publish(
+                    discovery_topic,
+                    json.dumps(discovery[component]),
+                    int(config["MQTT"]["QOS"]),
+                )
+            else:
+                print("MQTT not connected!")
+                raise MqttError("MQTT not connected!")
 
 
 def taptap_init():
@@ -608,6 +764,7 @@ def taptap_init():
 
     if taptap and taptap.stdout:
         # Set stdout as non blocking
+        logging("info", "TapTap process started")
         os.set_blocking(taptap.stdout.fileno(), False)
     else:
         logging("error", "TapTap process can't be started!")
