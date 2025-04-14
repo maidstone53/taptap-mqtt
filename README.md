@@ -1,6 +1,6 @@
 # Tigo CCA tap to Home Assistant MQTT bridge
 
-This is simple Python3 service to act as bridge between the Tigo CCA gateway tapping device implemented using [taptap](https://github.com/willglynn/taptap) project and the [Home Assistant MQTT integration](https://www.home-assistant.io/integrations/mqtt/). It read data from taptap and push them into HA as a sensors values. It supports HA MQTT auto [discovery](https://www.home-assistant.io/integrations/mqtt/#mqtt-discovery) to provide for easy integration with the Home Assistant. To make it work you need to install appropriate Python3 libraries and configure your installation in the config file example, renaming it to `config.ini`.
+This is simple Python3 service to act as bridge between the Tigo CCA gateway tapping device implemented using [taptap](https://github.com/willglynn/taptap) project and the [Home Assistant MQTT integration](https://www.home-assistant.io/integrations/mqtt/). It reads data from taptap and push them into HA as a sensors values. It supports HA MQTT auto [discovery](https://www.home-assistant.io/integrations/mqtt/#mqtt-discovery) (both new device type as well as older per entity type - to ensure backward compatibility with HA < 2024.12.0 or OpenHab) to provide for easy integration with the Home Assistant. To make it work you need to install appropriate Python3 libraries and configure your installation in the config file example, renaming it to `config.ini`.
 
 Provided integration:
 
