@@ -13,6 +13,8 @@ USER = mqttuser
 PASS = mqttpass
 
 [TAPTAP]
+# log level, possible values are error, warning, info, debug
+LOG_LEVEL = warning
 # Path to the taptap binary
 BINARY = ./taptap
 # serial device to use like /dev/ACM0, set empty if using Modbus to Ethernet to Modbus convertor

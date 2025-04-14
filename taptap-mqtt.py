@@ -28,7 +28,20 @@ class MqttError(Exception):
     pass
 
 
+def logging(level, message):
+    if level in log_levels and log_levels[level] >= log_level:
+        print(level.upper() + ":", message)
+
+
 # Global variables
+log_level = 1
+log_levels = {
+    "error": 3,
+    "warning": 2,
+    "info": 1,
+    "debug": 0,
+}
+
 state = {"time": 0, "uptime": 0, "state": "offline", "nodes": {}, "stats": {}}
 stats_ops = ["min", "max", "avg"]
 stats_sensors = [
@@ -61,6 +74,7 @@ config_validation = {
         "PASS?": r".+",
     },
     "TAPTAP": {
+        "LOG_LEVEL": r"[error|warn|info|debug]",
         "BINARY": r"^(\.{0,2}\/)*(\w+\/)*taptap$",
         "SERIAL?": r"^\/dev\/tty\w+$",
         "ADDRESS?": r"^((25[0-5]|(2[0-4]|1\d|[1-9]|)\d)\.?\b){4}$",
@@ -84,22 +98,25 @@ config_validation = {
     },
 }
 
-
 # Read config
+logging("debug", "Processing config")
 config = configparser.ConfigParser()
 if len(sys.argv) > 1 and sys.argv[1] and Path(sys.argv[1]).is_file():
-    print("Reading config file: " + sys.argv[1])
+    logging("info", "Reading config file: " + sys.argv[1])
     config.read(sys.argv[1])
 elif Path("config.ini").is_file():
-    print("Reading default config file: ./config.ini")
+    logging("info", "Reading default config file: ./config.ini")
     config.read("config.ini")
 else:
-    print("No valid configuration file found/specified")
+    logging("info", "No valid configuration file found/specified")
     exit(1)
+
+logging("debug", f"Config data:")
+logging("debug", {section: dict(config[section]) for section in config.sections()})
 
 for section in config_validation:
     if not section in config.sections():
-        print("Missing config section: " + section)
+        logging("error", "Missing config section: " + section)
         exit(1)
     for param1 in config_validation[section]:
         optional = False
@@ -109,18 +126,20 @@ for section in config_validation:
             optional = True
 
         if not param2 in config[section] or config[section][param2] is None:
-            print("Missing config parameter: " + param2)
+            logging("error", "Missing config parameter: " + param2)
             exit(1)
         elif config_validation[section][param1] and not re.match(
             config_validation[section][param1], config[section][param2]
         ):
             if not (optional and not config[section][param2]):
-                print("Invalid config entry: " + section + "/" + param2)
+                logging("error", "Invalid config entry: " + section + "/" + param2)
                 exit(1)
 
+if config["TAPTAP"]["LOG_LEVEL"] and config["TAPTAP"]["LOG_LEVEL"] in log_levels:
+    log_level = log_levels[config["TAPTAP"]["LOG_LEVEL"]]
 
 if not Path(config["TAPTAP"]["BINARY"]).is_file():
-    print("TATTAP BINARY doesn't exists!")
+    logging("error", "TATTAP BINARY doesn't exists!")
     exit(1)
 
 if (
@@ -128,22 +147,27 @@ if (
     or (config["TAPTAP"]["SERIAL"] and config["TAPTAP"]["ADDRESS"])
     or (config["TAPTAP"]["ADDRESS"] and not config["TAPTAP"]["PORT"])
 ):
-    print("Either TAPTAP SERIAL or ADDRESS and PORT shall be set!")
+    logging("error", "Either TAPTAP SERIAL or ADDRESS and PORT shall be set!")
     exit(1)
 
 
 node_names = list(map(str.strip, config["TAPTAP"]["MODULE_NAMES"].lower().split(",")))
 if not len(node_names) or not (all([re.match(r"^\w+$", val) for val in node_names])):
-    print(f"MODULE_NAMES shall be comma separated list of modules names: {node_names}")
+    logging(
+        "error",
+        f"MODULE_NAMES shall be comma separated list of modules names: {node_names}",
+    )
     exit(1)
 
 node_ids = list(map(str.strip, config["TAPTAP"]["MODULE_IDS"].split(",")))
 if not len(node_ids) or not (all([re.match(r"^\d+$", val) for val in node_ids])):
-    print(f"MODULE_IDS shall be comma separated list of modules IDs: {node_ids}")
+    logging(
+        "error", f"MODULE_IDS shall be comma separated list of modules IDs: {node_ids}"
+    )
     exit(1)
 
 if len(node_ids) != len(node_names):
-    print("MODULE_IDS and MODULE_NAMES shall have same number of modules")
+    logging("error", "MODULE_IDS and MODULE_NAMES shall have same number of modules")
     exit(1)
 
 # Init nodes dictionary
@@ -163,8 +187,11 @@ state_topic = (
     config["TAPTAP"]["TOPIC_PREFIX"] + "/" + config["TAPTAP"]["TOPIC_NAME"] + "/state"
 )
 
+logging("debug", f"Configured nodes: {nodes}")
+
 
 def taptap_tele(mode):
+    logging("debug", "Into taptap_tele")
     global last_tele
     global taptap
     global state
@@ -173,16 +200,19 @@ def taptap_tele(mode):
 
     # Check taptap process is alive
     if not taptap or not taptap.stdout or taptap.poll() is not None:
-        print("TapTap process is not running!")
+        logging("error", "TapTap process is not running!")
         raise AppError("TapTap process is not running!")
 
     for line in taptap.stdout:
         try:
             data = json.loads(line)
         except json.JSONDecodeError as error:
-            print(f"Can't parse json: {error}")
+            logging("warning", f"Can't parse json: {error}")
+            logging("warning", line)
             continue
 
+        logging("debug", "Received taptap data")
+        logging("debug", line)
         for name in [
             "gateway",
             "node",
@@ -195,8 +225,8 @@ def taptap_tele(mode):
             "timestamp",
         ]:
             if name not in data.keys():
-                print(f"Missing required key: '{name}'")
-                print(data)
+                logging("warning", f"Missing required key: '{name}'")
+                logging("debug", data)
                 break
             elif name in ["gateway", "node"]:
                 if not (
@@ -204,10 +234,12 @@ def taptap_tele(mode):
                     and "id" in data[name].keys()
                     and isinstance(data[name]["id"], int)
                 ):
-                    print(f"Invalid key: '{name}' value: '{data[name]}'")
+                    logging("warning", f"Invalid key: '{name}' value: '{data[name]}'")
+                    logging("debug", data)
                     break
                 if name == "node" and str(data[name]["id"]) not in nodes.keys():
-                    print(f"Unknown node id: '{data[name]['id']}'")
+                    logging("warning", f"Unknown node id: '{data[name]['id']}'")
+                    logging("debug", data)
                     break
                 data[name + "_id"] = data[name]["id"]
                 del data[name]
@@ -219,20 +251,23 @@ def taptap_tele(mode):
                 "temperature",
             ]:
                 if not isinstance(data[name], (float, int)):
-                    print(f"Invalid key: '{name}' value: '{data[name]}'")
+                    logging("warning", f"Invalid key: '{name}' value: '{data[name]}'")
+                    logging("debug", data)
                     break
                 if name == "dc_dc_duty_cycle":
                     data["duty_cycle"] = round(data.pop("dc_dc_duty_cycle") * 100, 2)
             elif name in ["rssi"]:
                 if not isinstance(data[name], int):
-                    print(f"Invalid key: '{name}' value: '{data[name]}'")
+                    logging("warning", f"Invalid key: '{name}' value: '{data[name]}'")
+                    logging("debug", data)
                     break
             elif name == "timestamp":
                 if not (isinstance(data[name], str)) and re.match(
                     r"^\d{4}\-\d{2}\-\d{2}T\d{2}\:\d{2}\:\d{2}\.\d{6,9}\+\d{2}\:\d{2}$",
                     data[name],
                 ):
-                    print(f"Invalid key: '{name}' value: '{data[name]}'")
+                    logging("warning", f"Invalid key: '{name}' value: '{data[name]}'")
+                    logging("debug", data)
                     break
                 try:
                     if len(data[name]) == 35:
@@ -246,23 +281,31 @@ def taptap_tele(mode):
                             "%Y-%m-%dT%H:%M:%S.%f%z",
                         )
                     else:
-                        print(f"Invalid key 'timestamp' format: '{data[name]}'")
+                        logging(
+                            "warning", f"Invalid key 'timestamp' format: '{data[name]}'"
+                        )
+                        logging("debug", data)
                         break
                     data["timestamp"] = tmstp.isoformat()
                     data["tmstp"] = tmstp.timestamp()
                 except:
-                    print(f"Invalid key: '{name}' value: '{data[name]}'")
+                    logging("warning", f"Invalid key: '{name}' value: '{data[name]}'")
+                    logging("debug", data)
                     break
                 # Copy validated data into cache struct
                 if data["tmstp"] + int(config["TAPTAP"]["UPDATE"]) < now:
                     diff = round(now - data["tmstp"], 1)
-                    print(
-                        f"Old data detected: '{data[name]}', time difference: '{diff}'s"
+                    logging(
+                        "warning",
+                        f"Old data detected: '{data[name]}', time difference: '{diff}'s",
                     )
+                    logging("debug", data)
                     break
                 else:
                     data["power"] = data["voltage_out"] * data["current"]
                     cache[nodes[str(data["node_id"])]][data["tmstp"]] = data
+                    logging("debug", "Successfully processed data line")
+                    logging("debug", data)
 
     if mode or last_tele + int(config["TAPTAP"]["UPDATE"]) < now:
         online_nodes = 0
@@ -276,6 +319,13 @@ def taptap_tele(mode):
             node_name = nodes[node_id]
             if node_name in cache.keys() and len(cache[node_name]):
                 # Node is online - populate state struct
+                if (
+                    not node_name in state["nodes"]
+                    or state["nodes"][node_name]["state"] != "online"
+                ):
+                    logging("info", f"Node {node_name} came online")
+                else:
+                    logging("debug", f"Node {node_name} is online")
                 online_nodes += 1
                 last = max(cache[node_name].keys())
                 state["nodes"][node_name]["state"] = "online"
@@ -339,6 +389,7 @@ def taptap_tele(mode):
 
             elif not node_name in state["nodes"]:
                 # Node not online - init default values
+                logging("debug", f"Node {node_name} init as offline")
                 state["nodes"][node_name] = {
                     "node_id": node_id,
                     "gateway_id": 0,
@@ -359,6 +410,7 @@ def taptap_tele(mode):
                 < now
             ):
                 # Node went recently offline - reset values
+                logging("info", f"Node {node_name} went offline")
                 state["nodes"][node_name].update(
                     {
                         "state": "offline",
@@ -374,6 +426,10 @@ def taptap_tele(mode):
 
         # Calculate averages and set device state
         if online_nodes > 0:
+            if online_nodes < len(node_ids):
+                logging("info", f"Only {online_nodes} nodes reported online")
+            else:
+                logging("debug", f"{online_nodes} nodes reported online")
             state["state"] = "online"
             for sensor in stats_sensors:
                 state["stats"][sensor]["avg"] /= online_nodes
@@ -382,6 +438,7 @@ def taptap_tele(mode):
                         state["stats"][sensor]["avg"], sensors[sensor]["round"]
                     )
         else:
+            logging("debug", f"No nodes reported online")
             for sensor in stats_sensors:
                 for op in stats_ops:
                     state["stats"][sensor][op] = 0
@@ -396,15 +453,17 @@ def taptap_tele(mode):
         )
         state["time"] = datetime.fromtimestamp(now, tz.tzlocal()).isoformat()
 
-        if client and client.connected_flag:
+        if client and client.is_connected():
+            logging("debug", f"Updating MQTT state topic {state_topic}")
             client.publish(state_topic, json.dumps(state), int(config["MQTT"]["QOS"]))
             last_tele = now
         else:
-            print("MQTT not connected!")
+            logging("error", "MQTT not connected!")
             raise MqttError("MQTT not connected!")
 
 
 def taptap_discovery():
+    logging("debug", "Into taptap_discovery")
     if not config["HA"]["DISCOVERY_PREFIX"]:
         return
     if str_to_bool(config["HA"]["DISCOVERY_LEGACY"]):
@@ -414,6 +473,7 @@ def taptap_discovery():
 
 
 def taptap_discovery_device():
+    logging("debug", "Into taptap_discovery_device")
     global discovery
 
     if discovery is None:
@@ -519,15 +579,21 @@ def taptap_discovery_device():
         discovery["qos"] = config["MQTT"]["QOS"]
 
     if len(discovery):
-        if client and client.connected_flag:
+        if client and client.is_connected():
             # Sent LWT update
+            logging("debug", f"Publish MQTT lwt topic {lwt_topic}")
             client.publish(lwt_topic, payload="online", qos=0, retain=True)
             # Sent discovery
-            client.publish(
+            discovery_topic = (
                 config["HA"]["DISCOVERY_PREFIX"]
                 + "/device/"
                 + config["TAPTAP"]["TOPIC_NAME"]
-                + "/config",
+                + "/config"
+            )
+            logging("debug", f"Publish MQTT discovery topic {discovery_topic}")
+            logging("debug", discovery)
+            client.publish(
+                discovery_topic,
                 json.dumps(discovery),
                 int(config["MQTT"]["QOS"]),
             )
@@ -537,6 +603,7 @@ def taptap_discovery_device():
 
 
 def taptap_discovery_legacy():
+    logging("debug", "Into taptap_discovery_legacy")
     global discovery
 
     if discovery is None:
@@ -642,13 +709,20 @@ def taptap_discovery_legacy():
                     )
 
     if len(discovery):
+        if client and client.is_connected():
+            # Sent LWT update
+            logging("debug", f"Publish MQTT lwt topic {lwt_topic}")
+            client.publish(lwt_topic, payload="online", qos=0, retain=True)
         for component in discovery.keys():
-            if client and client.connected_flag:
-                # Sent LWT update
-                client.publish(lwt_topic, payload="online", qos=0, retain=True)
+            if client and client.is_connected():
+                discovery_topic = (
+                    config["HA"]["DISCOVERY_PREFIX"] + "/" + component + "/config"
+                )
                 # Sent discovery
+                logging("debug", f"Publish MQTT discovery topic {discovery_topic}")
+                logging("debug", discovery[component])
                 client.publish(
-                    config["HA"]["DISCOVERY_PREFIX"] + "/" + component + "/config",
+                    discovery_topic,
                     json.dumps(discovery[component]),
                     int(config["MQTT"]["QOS"]),
                 )
@@ -658,6 +732,7 @@ def taptap_discovery_legacy():
 
 
 def taptap_init():
+    logging("debug", "Into taptap_init")
     global taptap
 
     # Initialize taptap process
@@ -684,18 +759,20 @@ def taptap_init():
             stdout=subprocess.PIPE,
         )
     else:
-        print("Either TAPTAP SERIAL or ADDRESS and PORT shall be set!")
+        logging("error", "Either TAPTAP SERIAL or ADDRESS and PORT shall be set!")
         exit(1)
 
     if taptap and taptap.stdout:
         # Set stdout as non blocking
+        logging("info", "TapTap process started")
         os.set_blocking(taptap.stdout.fileno(), False)
     else:
-        print("TapTap process is not running!")
-        raise AppError("TapTap process is not running!")
+        logging("error", "TapTap process can't be started!")
+        raise AppError("TapTap process can't be started!")
 
 
 def taptap_cleanup():
+    logging("debug", "Into taptap_cleanup")
     global taptap
 
     if taptap:
@@ -707,12 +784,11 @@ def taptap_cleanup():
 
 
 def mqtt_init():
+    logging("debug", "Into mqtt_init")
     global client
 
     # Create mqtt client
     client = mqtt.Client()
-    client.connected_flag = 0
-    client.reconnect_count = 0
     # Register LWT message
     client.will_set(lwt_topic, payload="offline", qos=0, retain=True)
     # Register connect callback
@@ -732,14 +808,20 @@ def mqtt_init():
         int(config["MQTT"]["TIMEOUT"]),
     )
 
+    timeout = 0
+    reconnect = 0
     time.sleep(1)
-    while not client.connected_flag:
-        print("MQTT waiting to connect")
-        client.reconnect_count += 1
-        if client.reconnect_count > 10:
-            print("MQTT not connected!")
-            raise MqttError("MQTT not connected!")
-        time.sleep(3)
+    while not client.is_connected():
+        time.sleep(1)
+        timeout += 1
+        if timeout > 15:
+            print("MQTT waiting to connect")
+            if reconnect > 10:
+                print("MQTT not connected!")
+                raise MqttError("MQTT not connected!")
+            client.reconnect()
+            reconnect += 1
+            timeout = 0
 
     # Subscribe for homeassistant birth messages
     if config["HA"]["BIRTH_TOPIC"]:
@@ -747,11 +829,12 @@ def mqtt_init():
 
 
 def mqtt_cleanup():
+    logging("debug", "Into mqtt_cleanup")
     global client
 
     if client:
         client.loop_stop()
-        if client.connected_flag:
+        if client.is_connected():
             if config["HA"]["BIRTH_TOPIC"]:
                 client.unsubscribe(config["HA"]["BIRTH_TOPIC"])
             client.disconnect()
@@ -760,37 +843,40 @@ def mqtt_cleanup():
 
 # The callback for when the client receives a CONNACK response from the server.
 def mqtt_on_connect(client, userdata, flags, rc):
+    logging("debug", "Into mqtt_on_connect")
     if rc != 0:
-        print("MQTT unexpected connect return code " + str(rc))
+        logging("warning", "MQTT unexpected connect return code " + str(rc))
     else:
-        print("MQTT client connected")
-        client.connected_flag = 1
+        logging("info", "MQTT client connected")
 
 
 # The callback for when the client receives a DISCONNECT from the server.
 def mqtt_on_disconnect(client, userdata, rc):
-    client.connected_flag = 0
+    logging("debug", "Into mqtt_on_disconnect")
     if rc != 0:
-        print("MQTT unexpected disconnect return code " + str(rc))
-    print("MQTT client disconnected")
+        logging("warning", "MQTT unexpected disconnect return code " + str(rc))
+    logging("info", "MQTT client disconnected")
 
 
 # The callback for when a PUBLISH message is received from the server.
 def mqtt_on_message(client, userdata, msg):
+    logging("debug", "Into mqtt_on_message")
     topic = str(msg.topic)
     payload = str(msg.payload.decode("utf-8"))
+    logging("debug", f"MQTT received topic: {topic}, payload: {payload}")
     match_birth = re.match(r"^" + config["HA"]["BIRTH_TOPIC"] + "$", topic)
     if config["HA"]["BIRTH_TOPIC"] and match_birth:
         # discovery
         taptap_discovery()
     else:
-        print("Unknown topic: " + topic + ", message: " + payload)
+        logging("warning", "Unknown topic: " + topic + ", message: " + payload)
 
 
 # Touch state file on successful run
 def state_file(mode):
+    logging("debug", "Into state_file")
     if mode:
-        if int(config["RUNTIME"]["MAX_ERROR"]) > 0 and config["RUNTIME"]["STATE_FILE"]:
+        if config["RUNTIME"]["STATE_FILE"]:
             path = os.path.split(config["RUNTIME"]["STATE_FILE"])
             try:
                 # Create stat file directory if not exists
@@ -799,9 +885,11 @@ def state_file(mode):
                 # Write stats file
                 with open(config["RUNTIME"]["STATE_FILE"], "a"):
                     os.utime(config["RUNTIME"]["STATE_FILE"], None)
+                logging("debug", "stats file updated")
             except IOError as error:
-                print(
-                    f"Unable to write to file: {config['RUNTIME']['STATE_FILE']} error: {error}"
+                logging(
+                    "error",
+                    f"Unable to write to file: {config['RUNTIME']['STATE_FILE']} error: {error}",
                 )
                 exit(1)
     elif os.path.isfile(config["RUNTIME"]["STATE_FILE"]):
@@ -809,13 +897,9 @@ def state_file(mode):
 
 
 def str_to_bool(string):
-    """Converts `s` to boolean. Assumes `s` is case-insensitive."""
+    # Converts `s` to boolean. Assumes string is case-insensitive
     return string.lower() in ["true", "1", "t", "y", "yes"]
 
-
-# Add connection flags
-mqtt.Client.connected_flag = 0
-mqtt.Client.reconnect_count = 0
 
 client = None
 taptap = None
@@ -833,18 +917,19 @@ while True:
             taptap_init()
         # Sent discovery
         taptap_discovery()
-        # Run sending thread
+        # Run update loop
         while True:
             taptap_tele(0)
             state_file(1)
             restart = 0
             time.sleep(1)
     except BaseException as error:
-        print("An exception occurred:", type(error).__name__, "–", error)
+        logging("error", f"An exception occurred: {type(error).__name__} – {error}")
         if type(error) in [MqttError, AppError] and (
             int(config["RUNTIME"]["MAX_ERROR"]) == 0
             or restart <= int(config["RUNTIME"]["MAX_ERROR"])
         ):
+            logging("error", "")
             if type(error) == MqttError:
                 mqtt_cleanup()
             elif type(error) == AppError:
@@ -853,11 +938,13 @@ while True:
             # Try to reconnect later
             time.sleep(10)
         elif type(error) in [KeyboardInterrupt, SystemExit]:
+            logging("error", "Gracefully terminating application")
             mqtt_cleanup()
             taptap_cleanup()
             state_file(0)
             # Graceful shutdown
             sys.exit(0)
         else:
+            logging("error", f"Unknown exception, aborting application")
             # Exit with error
             sys.exit(1)
