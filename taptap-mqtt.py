@@ -149,7 +149,7 @@ if len(node_ids) != len(node_names):
 # Init nodes dictionary
 nodes = dict(zip(node_ids, node_names))
 
-# Init cache records
+# Init cache struct
 cache = dict.fromkeys(node_names, {})
 
 # Init discovery struct
@@ -161,12 +161,6 @@ lwt_topic = (
 )
 state_topic = (
     config["TAPTAP"]["TOPIC_PREFIX"] + "/" + config["TAPTAP"]["TOPIC_NAME"] + "/state"
-)
-discovery_topic = (
-    config["HA"]["DISCOVERY_PREFIX"]
-    + "/device/"
-    + config["TAPTAP"]["TOPIC_NAME"]
-    + "/config"
 )
 
 
@@ -530,7 +524,12 @@ def taptap_discovery_device():
             client.publish(lwt_topic, payload="online", qos=0, retain=True)
             # Sent discovery
             client.publish(
-                discovery_topic, json.dumps(discovery), int(config["MQTT"]["QOS"])
+                config["HA"]["DISCOVERY_PREFIX"]
+                + "/device/"
+                + config["TAPTAP"]["TOPIC_NAME"]
+                + "/config",
+                json.dumps(discovery),
+                int(config["MQTT"]["QOS"]),
             )
         else:
             print("MQTT not connected!")
@@ -649,7 +648,7 @@ def taptap_discovery_legacy():
                 client.publish(lwt_topic, payload="online", qos=0, retain=True)
                 # Sent discovery
                 client.publish(
-                    discovery_topic + "/" + component,
+                    config["HA"]["DISCOVERY_PREFIX"] + "/" + component + "/config",
                     json.dumps(discovery[component]),
                     int(config["MQTT"]["QOS"]),
                 )
