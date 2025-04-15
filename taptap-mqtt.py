@@ -74,7 +74,7 @@ config_validation = {
         "PASS?": r".+",
     },
     "TAPTAP": {
-        "LOG_LEVEL": r"[error|warn|info|debug]",
+        "LOG_LEVEL": r"[error|warning|info|debug]",
         "BINARY": r"^(\.{0,2}\/)*(\w+\/)*taptap$",
         "SERIAL?": r"^\/dev\/tty\w+$",
         "ADDRESS?": r"^((25[0-5]|(2[0-4]|1\d|[1-9]|)\d)\.?\b){4}$",
