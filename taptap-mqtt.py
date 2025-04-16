@@ -358,7 +358,6 @@ def taptap_tele(mode):
 
                 # Calculate max, min and sum for average sensor
                 for sensor in stats_sensors:
-                    state["stats"][sensor]["avg"] = 0
                     for op in stats_ops:
                         if state["stats"][sensor][op] is None:
                             state["stats"][sensor][op] = state["nodes"][node_name][
