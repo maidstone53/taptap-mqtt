@@ -262,23 +262,40 @@ def taptap_tele(mode):
                     logging("debug", data)
                     break
             elif name == "timestamp":
-                if not (isinstance(data[name], str)) and re.match(
-                    r"^\d{4}\-\d{2}\-\d{2}T\d{2}\:\d{2}\:\d{2}\.\d{6,9}\+\d{2}\:\d{2}$",
-                    data[name],
-                ):
+                if not (isinstance(data[name], str)) and data[name]:
                     logging("warning", f"Invalid key: '{name}' value: '{data[name]}'")
                     logging("debug", data)
                     break
                 try:
-                    if len(data[name]) == 35:
+                    if re.match(
+                        r"^\d{4}\-\d{2}\-\d{2}T\d{2}\:\d{2}\:\d{2}\.\d{9}\+\d{2}\:\d{2}$",
+                        data[name],
+                    ):
                         tmstp = datetime.strptime(
                             data[name][0:26] + data[name][29:],
                             "%Y-%m-%dT%H:%M:%S.%f%z",
                         )
-                    elif len(data[name]) == 32:
+                    elif re.match(
+                        r"^\d{4}\-\d{2}\-\d{2}T\d{2}\:\d{2}\:\d{2}\.\d{6}\+\d{2}\:\d{2}$",
+                        data[name],
+                    ):
                         tmstp = datetime.strptime(
                             data[name],
                             "%Y-%m-%dT%H:%M:%S.%f%z",
+                        )
+                    elif re.match(
+                        r"^\d{4}\-\d{2}\-\d{2}T\d{2}\:\d{2}\:\d{2}\.\d{9}Z$", data[name]
+                    ):
+                        tmstp = datetime.strptime(
+                            data[name][0:26] + "Z",
+                            "%Y-%m-%dT%H:%M:%S.%fZ",
+                        )
+                    elif re.match(
+                        r"^\d{4}\-\d{2}\-\d{2}T\d{2}\:\d{2}\:\d{2}\.\d{6}Z$", data[name]
+                    ):
+                        tmstp = datetime.strptime(
+                            data[name],
+                            "%Y-%m-%dT%H:%M:%S.%fZ",
                         )
                     else:
                         logging(
