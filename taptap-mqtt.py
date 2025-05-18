@@ -11,7 +11,7 @@ import uuid
 import re
 import subprocess
 from dateutil import tz
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 
 
