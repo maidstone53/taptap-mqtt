@@ -30,7 +30,7 @@ class MqttError(Exception):
 
 def logging(level, message):
     if level in log_levels and log_levels[level] >= log_level:
-        print(level.upper() + ":", message)
+        print("[" + str(datetime.now()) + "] " + level.upper() + ":", message)
 
 
 # Global variables
@@ -203,7 +203,15 @@ def taptap_tele(mode):
         logging("error", "TapTap process is not running!")
         raise AppError("TapTap process is not running!")
 
-    for line in taptap.stdout:
+    while True:
+        line = taptap.stdout.readline()
+        if not line:
+            break
+        elif time.time() - now > int(config["TAPTAP"]["UPDATE"]) - 1:
+            logging("warning", f"Slow run detected reading taptap messages!")
+            taptap.stdout.truncate()
+            break
+
         try:
             data = json.loads(line)
         except json.JSONDecodeError as error:
@@ -338,7 +346,7 @@ def taptap_tele(mode):
                 # Node is online - populate state struct
                 if (
                     not node_name in state["nodes"]
-                    or state["nodes"][node_name]["state"] != "online"
+                    or state["nodes"][node_name]["state"] == "offline"
                 ):
                     logging("info", f"Node {node_name} came online")
                 else:
@@ -404,7 +412,7 @@ def taptap_tele(mode):
                             ]
 
             elif not node_name in state["nodes"]:
-                # Node not online - init default values
+                # Node state unknown - init default values
                 logging("debug", f"Node {node_name} init as offline")
                 state["nodes"][node_name] = {
                     "node_id": node_id,
@@ -424,6 +432,7 @@ def taptap_tele(mode):
             elif (
                 state["nodes"][node_name]["tmstp"] + int(config["TAPTAP"]["TIMEOUT"])
                 < now
+                and state["nodes"][node_name]["state"] == "online"
             ):
                 # Node went recently offline - reset values
                 logging("info", f"Node {node_name} went offline")
@@ -761,6 +770,8 @@ def taptap_init():
                 config["TAPTAP"]["SERIAL"],
             ],
             stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            pipesize=1024 * 1024,
         )
     elif config["TAPTAP"]["ADDRESS"]:
         taptap = subprocess.Popen(
@@ -773,6 +784,8 @@ def taptap_init():
                 config["TAPTAP"]["PORT"],
             ],
             stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            pipesize=1024 * 1024,
         )
     else:
         logging("error", "Either TAPTAP SERIAL or ADDRESS and PORT shall be set!")
