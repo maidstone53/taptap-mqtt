@@ -7,7 +7,7 @@ It supports HA MQTT auto [discovery](https://www.home-assistant.io/integrations/
 If you are looking for seamlessly integrated solution for HomeAssistant please check my [HomeAssistant addons repository](https://github.com/litinoveweedle/hassio-addons), where I provide this software packaged as Hassio addon.
 
 ## To make it work you need to:
-- get taptap binary, either compile it from source, or check [my builds](https://github.com/litinoveweedle/taptap/releases)
+- get taptap binary, either compile it from [source](https://github.com/willglynn/taptap), or check [my builds](https://github.com/litinoveweedle/taptap/releases)
 - you will need Modbus to Ethernet or Modbus to USB converter, connected to Tigo CCA [as described](https://github.com/willglynn/taptap?tab=readme-ov-file#connecting)
 - install appropriate Python3 libraries - see `requirements.txt`
 - rename config file example `config.ini.example` to `config.ini`
