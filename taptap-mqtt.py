@@ -479,8 +479,16 @@ def taptap_tele(mode):
         state["time"] = datetime.fromtimestamp(now, tz.tzlocal()).isoformat()
 
         if client and client.is_connected():
+            # Sent LWT update
+            logging("debug", f"Publish MQTT lwt topic {lwt_topic}")
+            client.publish(
+                lwt_topic, payload="online", qos=int(config["MQTT"]["QOS"]), retain=True
+            )
+            # Sent State update
             logging("debug", f"Updating MQTT state topic {state_topic}")
-            client.publish(state_topic, json.dumps(state), int(config["MQTT"]["QOS"]))
+            client.publish(
+                state_topic, payload=json.dumps(state), qos=int(config["MQTT"]["QOS"])
+            )
             last_tele = now
         else:
             logging("error", "MQTT not connected!")
@@ -605,9 +613,6 @@ def taptap_discovery_device():
 
     if len(discovery):
         if client and client.is_connected():
-            # Sent LWT update
-            logging("debug", f"Publish MQTT lwt topic {lwt_topic}")
-            client.publish(lwt_topic, payload="online", qos=0, retain=True)
             # Sent discovery
             discovery_topic = (
                 config["HA"]["DISCOVERY_PREFIX"]
@@ -619,8 +624,8 @@ def taptap_discovery_device():
             logging("debug", discovery)
             client.publish(
                 discovery_topic,
-                json.dumps(discovery),
-                int(config["MQTT"]["QOS"]),
+                payload=json.dumps(discovery),
+                qos=int(config["MQTT"]["QOS"]),
             )
         else:
             print("MQTT not connected!")
@@ -734,10 +739,6 @@ def taptap_discovery_legacy():
                     )
 
     if len(discovery):
-        if client and client.is_connected():
-            # Sent LWT update
-            logging("debug", f"Publish MQTT lwt topic {lwt_topic}")
-            client.publish(lwt_topic, payload="online", qos=0, retain=True)
         for component in discovery.keys():
             if client and client.is_connected():
                 discovery_topic = (
@@ -748,8 +749,8 @@ def taptap_discovery_legacy():
                 logging("debug", discovery[component])
                 client.publish(
                     discovery_topic,
-                    json.dumps(discovery[component]),
-                    int(config["MQTT"]["QOS"]),
+                    payload=json.dumps(discovery[component]),
+                    qos=int(config["MQTT"]["QOS"]),
                 )
             else:
                 print("MQTT not connected!")
