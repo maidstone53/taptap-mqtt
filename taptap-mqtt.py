@@ -275,46 +275,12 @@ def taptap_tele(mode):
                     logging("debug", data)
                     break
                 try:
-                    if re.match(
-                        r"^\d{4}\-\d{2}\-\d{2}T\d{2}\:\d{2}\:\d{2}\.\d{9}\+\d{2}\:\d{2}$",
-                        data[name],
-                    ):
-                        tmstp = datetime.strptime(
-                            data[name][0:26] + data[name][29:],
-                            "%Y-%m-%dT%H:%M:%S.%f%z",
-                        )
-                    elif re.match(
-                        r"^\d{4}\-\d{2}\-\d{2}T\d{2}\:\d{2}\:\d{2}\.\d{6}\+\d{2}\:\d{2}$",
-                        data[name],
-                    ):
-                        tmstp = datetime.strptime(
-                            data[name],
-                            "%Y-%m-%dT%H:%M:%S.%f%z",
-                        )
-                    elif re.match(
-                        r"^\d{4}\-\d{2}\-\d{2}T\d{2}\:\d{2}\:\d{2}\.\d{9}Z$", data[name]
-                    ):
-                        tmstp = datetime.strptime(
-                            data[name][0:26] + "Z",
-                            "%Y-%m-%dT%H:%M:%S.%fZ",
-                        )
-                    elif re.match(
-                        r"^\d{4}\-\d{2}\-\d{2}T\d{2}\:\d{2}\:\d{2}\.\d{6}Z$", data[name]
-                    ):
-                        tmstp = datetime.strptime(
-                            data[name],
-                            "%Y-%m-%dT%H:%M:%S.%fZ",
-                        )
-                    else:
-                        logging(
-                            "warning", f"Invalid key 'timestamp' format: '{data[name]}'"
-                        )
-                        logging("debug", data)
-                        break
+                    from dateutil.parser import isoparse
+                    tmstp = isoparse(data[name])
                     data["timestamp"] = tmstp.isoformat()
                     data["tmstp"] = tmstp.timestamp()
-                except:
-                    logging("warning", f"Invalid key: '{name}' value: '{data[name]}'")
+                except Exception as e:
+                    logging("warning", f"Invalid key 'timestamp' format: '{data[name]}'")
                     logging("debug", data)
                     break
                 # Copy validated data into cache struct
